@@ -541,6 +541,14 @@ export function setTrap(game: Game, side: Side, power: number, price: number, no
 
 export const pullTrap = (game: Game): Game => (you(game).trap ? withYou(game, { ...you(game), trap: null }, null) : game);
 
+// Graves the game server turned away after they had already sprung here: the call they became goes, and the stake comes back.
+export function unspring(game: Game, price: number): Game {
+  const me = you(game);
+  const c = me.call;
+  if (!c?.maker || c.live || c.entry !== price) return game;
+  return withYou(game, { ...me, cash: c.stake, call: null, trap: null, liquidity: Math.max(0, (me.liquidity ?? 0) - c.stake * c.power) }, null);
+}
+
 // A thundercloud is where a call cashes in as a maker: past the price for a call, past the trap for a trap.
 export function canFlag(game: Game, price: number, now: number): boolean {
   const me = you(game);

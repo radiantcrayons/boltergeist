@@ -39,6 +39,7 @@ import {
   STRIKE,
   standings,
   trapped,
+  unspring,
   valueOf,
   worth,
   YOU,
@@ -464,6 +465,20 @@ test("a long trap goes below the price and a short one above, and setting anothe
   assert.equal(me(moved).trap?.price, 99.5);
   assert.equal(moved.feed.filter((e) => e.what === "trap").length, 1);
   assert.equal(me(pullTrap(moved)).trap, null);
+});
+
+test("graves the game server turned away after they sprang here come off, and the stake comes back to dig again", () => {
+  const sprung = advance(setTrap(started(), "long", 10, 99, now + 2000), bar(99.5, 98.9), now + 4000);
+  assert.ok(me(sprung).call);
+  const back = unspring(sprung, 99);
+  assert.equal(me(back).call, null);
+  assert.equal(me(back).trap, null);
+  assert.equal(me(back).cash, 50);
+  assert.equal(me(back).liquidity, 0);
+  assert.equal(canTrap(back, "long", 10, 98, now + 5000), true);
+  assert.equal(unspring(sprung, 98.5), sprung, "only the call those graves became");
+  const swooped = call(started(), "long", 10, now + 2000);
+  assert.equal(unspring(swooped, me(swooped).call!.entry), swooped, "not a call made at the price");
 });
 
 test("a thundercloud cashes in at its price as a maker, so graves and thundercloud make money on the smallest move", () => {

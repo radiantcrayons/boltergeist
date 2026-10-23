@@ -219,13 +219,23 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const shownPrice = mark?.p ?? game.price;
   const sideOf = (p: number): Side => (p < shownPrice ? "long" : "short");
   // A click takes the side of the price it lands on, then the nearest tick on that side, so one by the kids is never the price itself.
-  // The game server checks against its own copy of the price, a moment apart from ours, so nothing goes closer than a safe margin.
-  const margin = Math.max(3 * tickSize, shownPrice * 0.0001);
+  // The game server checks against its own copy of the price, a few seconds behind ours or ahead of it, so nothing goes closer
+  // than a safe margin past anywhere the price has been in that time, and wider when it's moving fast.
+  const recent = candles.slice(-13);
+  const typical = recent.length > 1 ? recent.slice(1).reduce((s, k, i) => s + Math.abs(k.c - recent[i].c), 0) / (recent.length - 1) : 0;
+  const margin = Math.max(3 * tickSize, shownPrice * 0.0001, typical * 1.5);
+  let low = shownPrice;
+  let high = shownPrice;
+  const last = ticks[ticks.length - 1]?.at ?? 0;
+  for (let i = ticks.length - 1; i >= 0 && ticks[i].at >= last - LATELY; i--) {
+    low = Math.min(low, ticks[i].p);
+    high = Math.max(high, ticks[i].p);
+  }
   const onTick = (p: number) => {
     const up = p >= shownPrice;
     let at = (up ? Math.ceil : Math.floor)(p / tickSize - (up ? 1e-9 : -1e-9)) * tickSize;
-    if (up && at < shownPrice + margin) at = Math.ceil((shownPrice + margin) / tickSize - 1e-9) * tickSize;
-    if (!up && at > shownPrice - margin) at = Math.floor((shownPrice - margin) / tickSize + 1e-9) * tickSize;
+    if (up && at < high + margin) at = Math.ceil((high + margin) / tickSize - 1e-9) * tickSize;
+    if (!up && at > low - margin) at = Math.floor((low - margin) / tickSize + 1e-9) * tickSize;
     return Number(at.toFixed(12));
   };
   const pick = (raw: number): Pick | null => {
@@ -536,6 +546,8 @@ const FEARS = ["whisper", "howl", "shriek"];
 // How many graves each digs, and so how many ghosts rise when they spring.
 const COUNTS = [4, 8, 12];
 const FEAR_TIPS = ["The least power this round allows: hardest to bust", "Halfway between", "The most power the market allows: the biggest swings"];
+// How far back the game server's copy of the price can be: Strike's price a few seconds old, kept by the server a moment more.
+const LATELY = 8000;
 
 // Every length of haunt is drawn at the Jump Scare's pace, five seconds a tile from the live prices, so the field moves alike in
 // all of them; the rounds and the rules keep their own clock.

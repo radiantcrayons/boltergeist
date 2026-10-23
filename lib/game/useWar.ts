@@ -27,6 +27,7 @@ import {
   STRIKE,
   TOP_STAKE,
   trapped,
+  unspring,
   valueOf,
   YOU,
   type Game,
@@ -275,16 +276,26 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
         // Turned away, not lost on the way: the game server doesn't have it, so this game lets it go too, and nothing that hung on
         // it is sent after it. A live order it left on Strike comes off with it.
         const refused = err instanceof Full || err.constructor === Error;
-        if (refused && m.what === "trap") {
-          update(g.id, (x) => (yours(x)?.trap?.price === m.price ? pullTrap(x) : x));
-          return setError("The price moved onto your graves before they went in: dig again");
+        const moved = /goe?s? (below|above|past) the price/.test(err.message);
+        // Graves turned away come off here too, even if the price has sprung them here on the way.
+        if (refused && m.what === "trap" && m.price !== undefined) {
+          const price = m.price;
+          update(g.id, (x) => (yours(x)?.trap?.price === price ? pullTrap(x) : unspring(x, price)));
+          return setError(moved ? "The price moved onto your graves before they went in: dig again" : `Your graves didn't go in: ${err.message}`);
         }
+        // Their fill follows them, and is turned away too: the graves' own refusal has said so already.
+        if (refused && m.what === "fill" && m.price !== undefined && /No graves/.test(err.message)) {
+          const price = m.price;
+          return update(g.id, (x) => unspring(x, price));
+        }
+        // Graves filled in that the game server never had: already as asked.
+        if (refused && m.what === "pull") return;
         if (refused && m.what === "flag" && m.price !== undefined) {
           update(g.id, (x) => {
             const f = yours(x);
             return f?.trap?.flag === m.price || f?.call?.flag === m.price ? plantFlag(x, undefined, Date.now()) : x;
           });
-          return setError("The price moved past your thundercloud before it went in: summon it again");
+          return setError(moved ? "The price moved past your thundercloud before it went in: summon it again" : `Your thundercloud didn't go in: ${err.message}`);
         }
         setError(`The game missed that: ${err.message}`);
       });
