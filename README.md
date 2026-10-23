@@ -84,13 +84,13 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
   you. Each strike lights the field: the sun's soft shadows give way to long ones thrown away from it. When
   the kids walk into it, lightning comes down on them and you bank, as a maker again. Graves in and
   thundercloud out and Strike pays you both ways, so even the smallest move your way is a win.
-- **Bank it** to close a call at the price now (a taker exit). Bank near the best price a call saw, for a
+- **Give up the ghost** to close a call at the price now (a taker exit). Close near the best price a call saw, for a
   good profit, and it's a **critical hit**.
-- **The bank button** shows what the price has done for your call, the way Strike shows a position's
-  P&L: it starts at zero and goes green the moment the price moves your way. **Your stack** is what you
-  have, the way Strike shows equity, with the rebate earned or fee paid getting in. Banking at the market
-  costs Strike's taker fee on the way out, and if that's more than the call made, the fees ate it; a
-  thundercloud earns the rebate instead. A line on the field marks where banking starts to pay, fees and all.
+- **The give up button** shows what you would walk away with right now, after every fee: Strike's fee to
+  get in, its taker fee for closing at the market, and the builder fee when one is set. It starts below
+  zero, so holding on is the default. **Your funds** are what you have, the way Strike shows equity. A
+  thundercloud closes as a maker and earns the rebate instead. A line on the field marks where giving
+  up starts to pay, fees and all.
 - **K.O.** Calls are knocked out where Strike would liquidate them. The further the kids walk back through
   your ghosts the fainter they get, and at the K.O. price they're gone: it takes your whole stack and you're out.
 - **No one is put out for waiting.** Rounds only raise the floor on power; nobody is eliminated at a

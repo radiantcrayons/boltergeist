@@ -1030,6 +1030,11 @@ h2 {
   box-shadow: 0 5px 0 #a8901a;
 }
 
+.order.bank span {
+  font-size: 22px;
+  white-space: nowrap;
+}
+
 .order:active {
   transform: translateY(4px);
   box-shadow: none;

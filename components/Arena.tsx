@@ -134,8 +134,8 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         const hp = Math.max(0, Math.round(10 + (10 * gain) / (e.stake ?? stake)));
         const move = e.move ?? 0;
         const ate = !e.maker && gain < 0 && move >= 0.005;
-        const title = e.crit ? "critical hit!" : e.maker ? "struck!" : gain >= 0 ? "banked!" : ate ? "fees ate it" : "banked a loss";
-        const detail = ate ? `${fmt.money(move, true)} on the call, ${fmt.money(gain, true)} after Strike's fees` : fmt.money(gain, true);
+        const title = e.crit ? "critical hit!" : e.maker ? "struck!" : "you gave up the ghost";
+        const detail = ate ? `${fmt.money(move, true)} on the call, ${fmt.money(gain, true)} after Strike's fees` : e.maker ? fmt.money(gain, true) : `${fmt.money(gain, true)} after every fee`;
         say(
           { title, detail, tone: gain >= 0 ? "good" : "bad", scene: scene({ kind: gain >= 0 ? "win" : "lose", side: e.side, you: [10, hp], them: [10, Math.max(0, Math.min(10, 20 - hp))], title, detail }) },
           e.maker ? "thunder" : gain > 0 ? "ready" : "place",
@@ -170,6 +170,8 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   // Banking at the market carries the builder fee, if there is one; ambushes and flags don't.
   const taker = STRIKE.taker + (game.live ? BUILDER.feeBps / 10_000 : 0);
   const bankFee = me.call ? valueOf(me.call, game.price, 0) - valueOf(me.call, game.price, taker) : 0;
+  // What giving up the ghost leaves you with right now: the move, less the fee in and the fee for closing at the market.
+  const walkAway = me.call ? valueOf(me.call, game.price, taker) - me.call.stake : 0;
   const even = me.call ? breakEven(me.call, taker) : 0;
   const trap = me.trap ?? null;
   const flag = me.call?.flag ?? trap?.flag;
@@ -382,10 +384,10 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
                 className="order bank"
                 onClick={bank}
                 disabled={!can}
-                title={`What the price has done for your call. Bank to close at the price now, and Strike takes ${fmt.money(bankFee)} for closing at the market; a thundercloud pays you instead (space)`}
+                title={`What you walk away with if you give up now, after every fee: Strike's fee to get in and ${fmt.money(bankFee)} for closing at the market. Hold on and a thundercloud pays you instead (space)`}
               >
-                <span>bank it</span>
-                <small>{fmt.money(moveOf(me.call, game.price), true)}</small>
+                <span>give up the ghost</span>
+                <small>{fmt.money(walkAway, true)}</small>
               </button>
             </>
           ) : game.over ? null : (
