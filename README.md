@@ -59,9 +59,8 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
   the line of time they stand on. Pointing at the field shows, faintly, the graves or thundercloud a click would put there. Everything on it is clay, drawn in code: the kids and the ghosts are rounded parts
   lit in hard bands, so there are no image files. Under it all, a low horror score, and sounds made in the
   browser: thuds, the earth cracking open, wind and thunder.
-- **Fair weather until you're in.** The field is clear and bright, with soft shadows lit from above. When your
-  graves spring, rain sets in while you're in. The only lightning is your thundercloud's, and each strike
-  throws hard, long shadows straight away from it.
+- **Rain all night.** It rains the whole haunt, with soft shadows lit from above. The only lightning is your
+  thundercloud's, once your ghosts are out, and each strike lights the whole field for a moment.
 - **Strike's order book, order by order.** Strike publishes its book at L3: every resting order, in the
   order it will fill. The field streams it live: the biggest orders waiting on Strike are zombie hands
   clawing up out of the ground on their prices' lines, in the candle the kids are walking through, and the

@@ -951,28 +951,11 @@ function merged(list: Box[], W: number, H: number): Box[] {
   return out;
 }
 
-// What throws a long shadow when lightning lights it: where it stands, how high it floats, how far it has risen out of the ground,
-// and the picture its shadow is cut from.
+// What stands in front of the words on the ground: where it stands, how high it floats, how far it has risen out of the ground,
+// and its picture.
 type Shape = { c: HTMLCanvasElement; ox: number; oy: number; w: number; h: number };
 type Caster = { x: number; y: number; z?: number; tall?: number; shape: () => Shape };
 const shapeOf = (f: Figure, dpr: number): Shape => ({ c: f.canvas, ox: f.ox / dpr, oy: f.oy / dpr, w: f.w / dpr, h: f.h / dpr });
-// Each picture's silhouette, cut once and kept, in the dark of a lightning shadow.
-const silhouettes = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
-function silhouette(c: HTMLCanvasElement) {
-  const was = silhouettes.get(c);
-  if (was) return was;
-  const s = document.createElement("canvas");
-  s.width = c.width;
-  s.height = c.height;
-  const g = s.getContext("2d")!;
-  g.drawImage(c, 0, 0);
-  g.globalCompositeOperation = "source-in";
-  g.fillStyle = "rgb(26, 28, 56)";
-  g.fillRect(0, 0, s.width, s.height);
-  silhouettes.set(c, s);
-  return s;
-}
-
 export function Field(props: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -1394,11 +1377,10 @@ export function Field(props: Props) {
     const put = (x: number, y: number, fn: () => void) => stood.push({ d: x + y, draw: fn });
     const shadows: (() => void)[] = [];
     const lights: Glow[] = [];
-    // What stands tall enough to throw a long shadow when lightning lights it, with the picture of it the shadow is cut from, where
-    // lightning is lighting the field this moment, and how much the sun's soft shadows give way to it.
+    // What stands tall, with the picture of it, so the words on the ground can be cut away behind it; and where lightning is lighting
+    // the field this moment, for the flash.
     const casters: Caster[] = [];
     const glare: { x: number; y: number }[] = [];
-    let sun = 1;
     const i0 = Math.floor(nowX + ext.x0) - 1;
     const i1 = Math.ceil(nowX + ext.x1) + 1;
     const clear = [yours.trap?.price, yours.call?.entry, yours.flag?.price].filter((p): p is number => p !== undefined).map(yOf);
@@ -1462,7 +1444,7 @@ export function Field(props: Props) {
         const f = treeAt(Math.round((A / 28) * (variant % 3 === 0 ? 1.15 : 1) * dpr * 10) / 10, variant);
         shadows.push(() => {
           const p = S(x, y);
-          blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * sun * faint);
+          blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * faint);
         });
         if (faint > 0.5) casters.push({ x, y, shape: () => shapeOf(f, dpr) });
         put(x, y, () => {
@@ -1475,7 +1457,7 @@ export function Field(props: Props) {
         const sp = deadSprite(A, variant);
         shadows.push(() => {
           const p = S(x, y);
-          blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * sun * faint);
+          blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * faint);
         });
         if (faint > 0.5) casters.push({ x, y, shape: () => sp });
         put(x, y, () => blit(ctx, sp, S(x, y), faint));
@@ -1546,7 +1528,7 @@ export function Field(props: Props) {
       }
       shadows.push(() => {
         const p = S(cloudX + 0.35, yf - 0.25);
-        blob(ctx, p.x, p.y, 2.1 * A, 0.95 * A, [118, 124, 160], 0.6 * sun);
+        blob(ctx, p.x, p.y, 2.1 * A, 0.95 * A, [118, 124, 160], 0.6);
       });
     }
     // Lightning comes down on the kids where they walked into your cloud: its last strike, from the cloud itself, which then goes.
@@ -1678,7 +1660,7 @@ export function Field(props: Props) {
       const st = s / made / dpr;
       shadows.push(() => {
         const p = S(x, y);
-        blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.5 * sun * clamp(1 - lift / (1.5 * A), 0.2, 1));
+        blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.5 * clamp(1 - lift / (1.5 * A), 0.2, 1));
       });
       casters.push({ x, y, z, shape: () => ({ c: f.canvas, ox: f.ox * st, oy: f.oy * st, w: f.w * st, h: f.h * st }) });
       put(x, y, () => {
@@ -1718,7 +1700,7 @@ export function Field(props: Props) {
         casters.push({ x, y, tall: ease(e), shape: () => stone });
         shadows.push(() => {
           const p = S(x, y);
-          blob(ctx, p.x + 0.14 * A, p.y - 0.06 * A, 0.34 * A * scale, 0.15 * A * scale, [110, 118, 150], 0.5 * e * sun);
+          blob(ctx, p.x + 0.14 * A, p.y - 0.06 * A, 0.34 * A * scale, 0.15 * A * scale, [110, 118, 150], 0.5 * e);
         });
         put(x, y, () => {
           const p = S(x, y);
@@ -1891,7 +1873,7 @@ export function Field(props: Props) {
       const alpha = 0.95 * appear(`${r.id}|ghost`);
       shadows.push(() => {
         const p = S(x, ry);
-        blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.45 * sun * alpha);
+        blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.45 * alpha);
       });
       casters.push({ x, y: ry, z, shape: () => ({ c: f.canvas, ox: f.ox * st, oy: f.oy * st, w: f.w * st, h: f.h * st }) });
       put(x, ry, () => {
@@ -1917,7 +1899,7 @@ export function Field(props: Props) {
     // They walk a step behind the price, its pool of light on the ground ahead of them where the middle one's torch shines.
     shadows.push(() => {
       const p = S(kx, y0);
-      blob(ctx, p.x, p.y, 0.8 * A, 0.36 * A, [92, 108, 136], 0.55 * sun);
+      blob(ctx, p.x, p.y, 0.8 * A, 0.36 * A, [92, 108, 136], 0.55);
     });
     const jump = Math.sin(spooked * Math.PI) * 14 * k;
     const kidsNow = kidsAt(Math.round(2.05 * k * dpr * 10) / 10, strideNow);
@@ -1934,33 +1916,8 @@ export function Field(props: Props) {
       torch = { x: p.x + lens.x, y: p.y + lens.y };
       glows.push({ p: torch, r: 0.35 * A, rgb: "255, 236, 190", a: 0.7 });
     });
-    // Lightning lights the field for a moment: the soft shadows from above give way to hard, long ones thrown straight away from it.
-    sun = glare.length ? 0.2 : 1;
     ctx.globalCompositeOperation = "multiply";
     shadows.forEach((fn) => fn());
-    // Each one's own silhouette, laid flat on the ground away from the strike: its height runs off along the ground, longer the
-    // nearer the strike, and its width lies across, kept the way round it's drawn.
-    // On a phone only what stands near the strike throws a long shadow.
-    const shadowReach = v.w < 600 || coarse() ? 3.5 : 6;
-    for (const c of casters) {
-      if (!glare.length) break;
-      const f = S(c.x, c.y);
-      let shape: Shape | null = null;
-      for (const src of glare) {
-        const d = Math.hypot(c.x - src.x, c.y - src.y);
-        if (d > shadowReach || d < 0.05) continue;
-        const o = S(src.x, src.y);
-        const len = Math.hypot(f.x - o.x, f.y - o.y) || 1;
-        const dx = (f.x - o.x) / len;
-        const dy = (f.y - o.y) / len;
-        shape ??= c.shape();
-        const reach = (2.4 + 2.2 * (1 - d / 6)) * (c.tall ?? 1);
-        const flip = dy > 0 || (dy === 0 && dx < 0) ? -1 : 1;
-        ctx.setTransform(-dy * flip * dpr, dx * flip * 0.5 * dpr, -dx * reach * dpr, -dy * reach * dpr, f.x * dpr, f.y * dpr);
-        ctx.globalAlpha = 0.25 + 0.5 * (1 - d / 6);
-        ctx.drawImage(silhouette(shape.c), -shape.ox, -shape.oy - (c.z ?? 0), shape.w, shape.h);
-      }
-    }
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
