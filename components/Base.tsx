@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import * as fmt from "@/lib/format";
 import { arenaAt, gain, KINDS, lineup, placeOf, ROLES, sameGame, SEATS, worth, YOU, type Arena, type Game, type Kind, type Player, type Role } from "@/lib/game/war";
 import { lobbies, me, NAME, rename } from "@/lib/online";
-import { play } from "@/lib/sfx";
+import { play, setHaunting } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
 import type { Mark, Ticker } from "@/lib/strike";
 import type { Market } from "@/lib/types";
@@ -189,6 +189,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
         className={`go ${live ? "live" : ""}`}
         disabled={!ready || joining}
         onClick={() => {
+          setHaunting(true);
           play("arm");
           if (joined) onOpen(joined.id);
           else onEnter(kind, role);

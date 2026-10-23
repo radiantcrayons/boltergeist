@@ -11,6 +11,8 @@ let audio: AudioContext | null = null;
 let bus: { dry: GainNode; wet: GainNode } | null = null;
 let hiss: AudioBuffer | null = null;
 let on = true;
+// Silent on the start page: sound begins with the haunt button and stops on the way back out.
+let haunting = false;
 let music: HTMLAudioElement | null = null;
 
 // Brown noise, two seconds of it, made once: the stuff rumbles and wind are cut from.
@@ -149,7 +151,7 @@ const VOICES: Record<Sound, { dry: Voice[]; wet?: Voice[] }> = {
 
 // The music: one track, looping quietly under the game. Browsers only let it start after a touch or a key.
 function startMusic() {
-  if (!on || typeof window === "undefined") return;
+  if (!on || !haunting || typeof window === "undefined") return;
   if (!music) {
     music = new Audio(TRACK);
     music.volume = MUSIC;
@@ -162,6 +164,12 @@ if (typeof window !== "undefined") {
   for (const kind of ["pointerdown", "keydown"]) window.addEventListener(kind, startMusic);
 }
 
+export function setHaunting(now: boolean) {
+  haunting = now;
+  if (now) startMusic();
+  else music?.pause();
+}
+
 export const setSound = (enabled: boolean) => {
   on = enabled;
   if (!enabled) music?.pause();
@@ -169,7 +177,7 @@ export const setSound = (enabled: boolean) => {
 };
 
 export function play(sound: Sound) {
-  if (!on) return;
+  if (!on || !haunting) return;
   try {
     audio ??= new AudioContext();
     if (audio.state === "suspended") void audio.resume();

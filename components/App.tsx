@@ -6,7 +6,7 @@ import { loadTicks, saveTicks, withTick, type Tick } from "@/lib/game/ticks";
 import { useWar } from "@/lib/game/useWar";
 import { YOU, type Kind, type Role } from "@/lib/game/war";
 import { balance as fetchBalance, loadSession, saveSession, type Balance, type Session } from "@/lib/live/session";
-import { play, setSound } from "@/lib/sfx";
+import { play, setHaunting, setSound } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
 import { markets as loadMarkets, NETWORK, stream, type Mark, type Ticker } from "@/lib/strike";
 import type { Market } from "@/lib/types";
@@ -80,6 +80,12 @@ export default function App() {
   }, [sound]);
 
   const game = games.find((g) => g.id === open) ?? null;
+  const inGame = !!game;
+  // Sound stays on from the haunt button while a game is joining or open, and stops back on the start page.
+  useEffect(() => {
+    if (inGame) setHaunting(true);
+    else if (!war.joining) setHaunting(false);
+  }, [inGame, war.joining]);
   const shown = game?.symbol ?? symbol;
   const market = markets?.find((m) => m.symbol === shown);
   const goingLive = live && !!session;
