@@ -618,14 +618,14 @@ function scorchSprite(A: number, variant: number) {
 
 // A gravestone in your line of graves: rounded grey clay, its face lit and its edge in shade, moss at the foot, cracked, and its side's arrow
 // cut into it. Drawn from the middle of its foot.
-function graveSprite(A: number, side: Side, variant: number, size: number) {
+function graveSprite(A: number, side: Side, variant: number, size: number, tint?: string) {
   const q = Math.round(A * size * 4) / 4;
   const v = variant % 4;
   const w = 0.19 * q;
   const h = (0.5 + 0.06 * (v % 2)) * q;
   const d = 0.07 * q;
-  return sprite(`grave|${q}|${side}|${v}`, 2 * w + d + 14, h + d + 0.12 * q + 14, w + 7, h + d + 7, (g) => {
-    const stone = mix(CLAY.rock, [158, 156, 164], 0.5);
+  return sprite(`grave|${q}|${side}|${v}|${tint ?? ""}`, 2 * w + d + 14, h + d + 0.12 * q + 14, w + 7, h + d + 7, (g) => {
+    const stone = tint ? mix(mix(CLAY.rock, [158, 156, 164], 0.5), hex(tint), 0.62) : mix(CLAY.rock, [158, 156, 164], 0.5);
     g.rotate([-0.06, 0.04, 0.08, -0.03][v]);
     const outline = (ox: number, oy: number) => {
       g.beginPath();
@@ -1011,6 +1011,9 @@ export function Field(props: Props) {
   const soaked = useRef<{ c: HTMLCanvasElement | null; n: number; level: number }>({ c: null, n: -1, level: -1 });
   const hover = useRef<Pt | null>(null);
   const soft = useRef<HTMLCanvasElement | null>(null);
+  // How far into view each tall thing has faded, by its tile, so nothing pops in or out.
+  const fades = useRef(new Map<string, number>());
+  const fadeAt = useRef(0);
   const writing = useRef<HTMLCanvasElement | null>(null);
   const asked = useRef("");
   const trodden = useRef({ key: "", seen: new Map<string, boolean>() });
@@ -1414,18 +1417,30 @@ export function Field(props: Props) {
       return on;
     };
     const dec = groundFor(i0, i1, j0, j1, A, dpr);
+    const fadeStep = clamp((at - fadeAt.current) / 320, 0, 1);
+    fadeAt.current = at;
+    if (fades.current.size > 6000) fades.current.clear();
     for (const tile of dec.groves) {
       tile.on = false;
       const x = tile.i - nowX + tile.ox;
       const y = tile.j + 0.5 - g.cy + R / 2;
-      if (!seen(S(x, y), 10) || !clear.every((yc) => Math.abs(yc - y) > 1) || bare(x, y)) continue;
+      if (!seen(S(x, y), 2.6 * A)) continue;
+      const id = `${tile.i}|${tile.j}`;
+      const want = clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? 1 : 0;
+      const was = fades.current.get(id) ?? 0;
+      const shown = was + (want - was) * fadeStep;
+      if (shown < 0.01 && want === 0) {
+        fades.current.delete(id);
+        continue;
+      }
+      fades.current.set(id, shown);
       // Near the kids and the play around them everything tall goes faint, so the game is never hidden behind it; out past the
       // play the outer groves grow in.
       const d = Math.hypot(x + KIDS_BACK, y - y0);
       const grown = tile.outer ? clamp((d - 6) / 1.5, 0, 1) : 1;
       if (grown <= 0) continue;
       tile.on = true;
-      const faint = (0.15 + 0.85 * clamp((d - 3) / 3, 0, 1)) * grown;
+      const faint = (0.15 + 0.85 * clamp((d - 3) / 3, 0, 1)) * grown * shown;
       const { pick, variant } = tile;
       if (pick < 0.62) {
         const size = variant === 10 ? 0.7 : variant % 3 === 0 ? 1.15 : 1;
@@ -1824,8 +1839,8 @@ export function Field(props: Props) {
       labels.push(() => marking(text, 0, yf + 0.95, COLORS.volt, { align: "center", alpha: SET }));
     }
 
-    // Everyone else's ghosts, each player in their own hue, out toward the fog on the row where their graves wait or they came in:
-    // faint while they wait, solid once in. Smaller than yours, facing the kids, staggered where several share a row.
+    // Everyone else, each player in their own hue, in a column just east of yours: graves of their colour on the row where theirs
+    // wait, and their ghost on the row where they came in once they're in. Smaller than yours, staggered where several share a row.
     const crowd = new Map<number, number>();
     for (const r of pins) {
       const y = yOf(r.p);
@@ -1835,14 +1850,32 @@ export function Field(props: Props) {
       crowd.set(lane, n + 1);
       const rk = GHOST_KIND[r.role];
       const s = FIELD_SIZE[rk] * 0.7;
-      const x = F - 1.2 - n * 1.05;
+      const x = -KIDS_BACK + 5.5 + n * 1.05;
       const ry = y + (n ? (n % 2 ? 0.28 : -0.28) : 0);
+      if (!r.call) {
+        for (const [j, gx] of [x - 0.24, x + 0.24].entries()) {
+          const gy = ry + (j ? 0.12 : -0.12);
+          const stone = graveSprite(A, r.side, j + Math.floor(hash(gx * 3.1 + gy) * 4), scale * 1.2, r.hue);
+          casters.push({ x: gx, y: gy, shape: () => stone });
+          shadows.push(() => {
+            const p = S(gx, gy);
+            blob(ctx, p.x + 0.12 * A, p.y - 0.05 * A, 0.28 * A * scale, 0.12 * A * scale, [110, 118, 150], 0.45 * sun);
+          });
+          put(gx, gy, () => {
+            const p = S(gx, gy);
+            blit(ctx, moundSprite(A, false, scale * 1.05), p, 1);
+            blit(ctx, stone, p, 1);
+            blit(ctx, moundSprite(A, true, scale * 1.05), p, 1);
+          });
+        }
+        continue;
+      }
       const seed = hash([...r.id].reduce((h, ch) => h + ch.charCodeAt(0), 0) * 1.7);
       const phase = (reduced() ? 0 : at / 520) + seed * Math.PI * 2;
       const z = (5 + Math.sin(phase) * 2) * s * k;
       const f = ghostAt(rk, hex(r.hue), Math.round(1.9 * s * k * dpr * 10) / 10, 0, false, facing(x, ry));
       const st = 1 / dpr;
-      const alpha = r.call ? 0.95 : 0.6;
+      const alpha = 0.95;
       shadows.push(() => {
         const p = S(x, ry);
         blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.45 * sun * alpha);

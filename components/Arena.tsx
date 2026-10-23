@@ -272,8 +272,8 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     return fighters.flatMap((f): Pin[] => {
       if (f.id === YOU || f.out) return [];
       const hue = hues.get(f.id) ?? COLORS.text;
-      if (f.call) return [{ id: f.id, p: f.call.entry, role: f.role, hue, call: true }];
-      return f.trap ? [{ id: f.id, p: f.trap.price, role: f.role, hue, call: false }] : [];
+      if (f.call) return [{ id: f.id, p: f.call.entry, role: f.role, side: f.call.side, hue, call: true }];
+      return f.trap ? [{ id: f.id, p: f.trap.price, role: f.role, side: f.trap.side, hue, call: false }] : [];
     });
   }, [fighters]);
   const marks = useMemo(

@@ -1,11 +1,11 @@
-import type { Role } from "@/lib/game/war";
+import type { Role, Side } from "@/lib/game/war";
 
 // The colours the field and the panels share, and what the field marks, pins and offers at a price.
 export const COLORS = { up: "#2bf5b5", down: "#ff4d6d", volt: "#ffe14a", text: "#d6dee6", dim: "#7c8894", bull: "#f8931a" };
 
 export type Mark = { t: number; p: number; glyph: string; color: string };
 // Another player's ghosts on the field: where they wait over their graves or came in on a call, in that player's own hue.
-export type Pin = { id: string; p: number; role: Role; hue: string; call: boolean };
+export type Pin = { id: string; p: number; role: Role; side: Side; hue: string; call: boolean };
 
 // Each other player's hue, kept clear of your own mint and the long and short colours.
 export const HUES = ["#a77dff", "#5cc8ff", "#ff9f43", "#ff6ad5", "#d4a373", "#b9e35a", "#a0aec0", "#ffc6a5", "#7f8cff"];
