@@ -15,7 +15,6 @@ export type Yours = {
   trap?: { side: Side; price: number; at: number; power: number; count: number; ahead?: number };
   call?: { side: Side; entry: number; at: number; power: number; count: number; maker: boolean; koAt: number; move: number };
   flag?: { price: number; banks?: number; ahead?: number };
-  even?: number;
 };
 
 type Props = {
@@ -1342,10 +1341,7 @@ export function Field(props: Props) {
       if (x >= ext.x0 && x <= ext.x1) line(ctx, S(x, ext.y0), S(x, ext.y1), color, 2, [8, 6]);
     }
 
-    // Lines across the ground: chalk where giving up at the market breaks even, wire where you'd be knocked out.
-    if (yours.call && yours.even !== undefined && onMap(yOf(yours.even))) {
-      line(ctx, S(Math.max(X(yours.call.at), ext.x0), yOf(yours.even)), S(ext.x1, yOf(yours.even)), css(CLAY.offWhite, 0.8), 1.6, [2, 6]);
-    }
+    // A line across the ground where you'd be knocked out.
     if (yours.call && onMap(yOf(yours.call.koAt))) {
       const yk = yOf(yours.call.koAt);
       line(ctx, S(Math.max(X(yours.call.at), ext.x0), yk), S(ext.x1, yk), css(CLAY.steelDark, 0.8), 1.4);
@@ -1763,15 +1759,43 @@ export function Field(props: Props) {
       }
       const yk = yOf(call.koAt);
       if (onMap(yk)) labels.push(() => marking(`K.O. ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), 0.28, COLORS.down));
-      if (yours.even !== undefined && onMap(yOf(yours.even))) {
-        const ye = yOf(yours.even);
-        labels.push(() => marking("GIVING UP PAYS PAST HERE", 4.2, ye - 0.12, 0.24, "#e8edf2"));
-      }
     }
     if (yours.flag && yf !== null) {
       const banks = yours.flag.banks;
       const text = `${fmt.price(yours.flag.price, tickSize)}${banks !== undefined ? `  ${fmt.money(banks, true)}` : ""}`;
       labels.push(() => marking(text, cloudX, yf + 0.7, 0.34, COLORS.volt, { align: "center" }));
+    }
+
+    // Everyone else's ghosts, each player in their own hue, out toward the fog on the row where their graves wait or they came in:
+    // faint while they wait, solid once in. Smaller than yours, facing the kids, staggered where several share a row.
+    const crowd = new Map<number, number>();
+    for (const r of pins) {
+      const y = yOf(r.p);
+      if (!onMap(y)) continue;
+      const lane = Math.round(y * 2);
+      const n = crowd.get(lane) ?? 0;
+      crowd.set(lane, n + 1);
+      const rk = GHOST_KIND[r.role];
+      const s = FIELD_SIZE[rk] * 0.7;
+      const x = F - 1.2 - n * 1.05;
+      const ry = y + (n ? (n % 2 ? 0.28 : -0.28) : 0);
+      const seed = hash([...r.id].reduce((h, ch) => h + ch.charCodeAt(0), 0) * 1.7);
+      const phase = (reduced() ? 0 : at / 520) + seed * Math.PI * 2;
+      const z = (5 + Math.sin(phase) * 2) * s * k;
+      const f = ghostAt(rk, hex(r.hue), Math.round(1.9 * s * k * dpr * 10) / 10, 0, false, facing(x, ry));
+      const st = 1 / dpr;
+      const alpha = r.call ? 0.95 : 0.6;
+      shadows.push(() => {
+        const p = S(x, ry);
+        blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.45 * sun * alpha);
+      });
+      casters.push({ x, y: ry, z, shape: () => ({ c: f.canvas, ox: f.ox * st, oy: f.oy * st, w: f.w * st, h: f.h * st }) });
+      put(x, ry, () => {
+        const p = S(x, ry, z);
+        ctx.globalAlpha = alpha;
+        ctx.drawImage(f.canvas, p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
+        ctx.globalAlpha = 1;
+      });
     }
 
     // The kids: the price. They walk as far as the ground moves under them and the price carries them, a full stride to every half
@@ -2050,17 +2074,6 @@ export function Field(props: Props) {
       const y = yOf(mk.p);
       if (!onMap(y) || !seen(S(x, y))) continue;
       marking(mk.glyph, x, y + 0.2, 0.3, mk.color, { align: "center" });
-    }
-
-    // Others' graves, along the edge of the fog where they wait.
-    const stacked = new Map<number, number>();
-    for (const pin of pins) {
-      const y = yOf(pin.p);
-      if (!onMap(y)) continue;
-      const row = Math.round(y * 2);
-      const n = stacked.get(row) ?? 0;
-      stacked.set(row, n + 1);
-      marking(pin.glyph, F - 0.3 - n * 0.45, y + 0.18, 0.36, pin.color, { align: "center" });
     }
 
     // The prices, marked on the ground like the numbers on a pitch: each one every few tiles along its row, set in the ground so they

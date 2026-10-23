@@ -8,7 +8,6 @@ import { useBook } from "@/lib/live/book";
 import { ahead, join, key as bookKey, levels as bookLevels, type L3Side } from "@/lib/live/l3";
 import { BUILDER } from "@/lib/live/session";
 import {
-  breakEven,
   KINDS,
   koDistance,
   leastPower,
@@ -32,7 +31,7 @@ import { play, type Sound } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
 import { klines } from "@/lib/strike";
 import type { Candle } from "@/lib/types";
-import { COLORS, type Mark, type Pick, type Pin } from "./marks";
+import { COLORS, huesFor, type Mark, type Pick, type Pin } from "./marks";
 import { Cutscene, type Scene } from "./Cutscene";
 import { Board } from "./Board";
 import { Field, type Yours } from "./Field";
@@ -177,7 +176,6 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const bankFee = me.call ? valueOf(me.call, game.price, 0) - valueOf(me.call, game.price, taker) : 0;
   // What giving up the ghost leaves you with right now: the move, less the fee in and the fee for closing at the market.
   const walkAway = me.call ? valueOf(me.call, game.price, taker) - me.call.stake : 0;
-  const even = me.call ? breakEven(me.call, taker) : 0;
   const trap = me.trap ?? null;
   const flag = me.call?.flag ?? trap?.flag;
   // Strike's order book, order by order: where your graves and your thundercloud would stand in its line.
@@ -265,14 +263,19 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
-  const sideColor = (side: Side) => (side === "long" ? COLORS.up : COLORS.down);
-  const pins: Pin[] = game.fighters.flatMap((f) => (f.id !== YOU && f.trap && !f.out ? [{ p: f.trap.price, glyph: f.trap.side === "long" ? "▲" : "▼", color: sideColor(f.trap.side) }] : []));
+  const hues = huesFor(game.fighters.filter((f) => f.id !== YOU).map((f) => f.id));
+  const pins: Pin[] = game.fighters.flatMap((f): Pin[] => {
+    if (f.id === YOU || f.out) return [];
+    const hue = hues.get(f.id) ?? COLORS.text;
+    if (f.call) return [{ id: f.id, p: f.call.entry, role: f.role, hue, call: true }];
+    return f.trap ? [{ id: f.id, p: f.trap.price, role: f.role, hue, call: false }] : [];
+  });
   const marks: Mark[] = game.fighters
     .filter((f) => f.out)
     .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "KO" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt }));
   const yours: Yours = {
     ...(trap && !me.call && { trap: { side: trap.side, price: trap.price, at: trap.at, power: trap.power, count: COUNTS[fear], ahead: lineAhead?.orders } }),
-    ...(me.call && { call: { side: me.call.side, entry: me.call.entry, at: me.call.at, power: me.call.power, count: COUNTS[fear], maker: !!me.call.maker, koAt: me.call.koAt, move: moveOf(me.call, game.price) }, even }),
+    ...(me.call && { call: { side: me.call.side, entry: me.call.entry, at: me.call.at, power: me.call.power, count: COUNTS[fear], maker: !!me.call.maker, koAt: me.call.koAt, move: moveOf(me.call, game.price) } }),
     ...(flag !== undefined && { flag: { price: flag, banks: me.call ? valueOf(me.call, flag, STRIKE.maker) - me.call.stake : undefined, ahead: flagAhead?.orders } }),
   };
   const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => ({ at: roundEnds(game, r), round: r + 2, floor: kind.floors[r + 1] }));

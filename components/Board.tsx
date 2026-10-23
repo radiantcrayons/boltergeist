@@ -4,10 +4,11 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, type ReactNode } fr
 import * as fmt from "@/lib/format";
 import { foughtIn, gain, ROLES, SEATS, standingCount, standings, worth, YOU, type Fighter, type Game, type Role } from "@/lib/game/war";
 import s from "./Board.module.css";
+import { huesFor } from "./marks";
 
 type Props = { game: Game; round: number; waiting: boolean };
 type Tone = "ko" | "zap" | "long" | "short" | "ambushLong" | "ambushShort" | "ready" | "idle";
-type Seat = { id: string; place: number; name: string; role: Role; bot: boolean; live: boolean; you: boolean; text: string; tone: Tone; g: number; title: string };
+type Seat = { id: string; place: number; name: string; role: Role; bot: boolean; live: boolean; you: boolean; hue?: string; text: string; tone: Tone; g: number; title: string };
 
 const SLIDE = 560;
 const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
@@ -65,6 +66,7 @@ export function Board({ game, round, waiting }: Props) {
   const gone = useRef(new Set<string>());
   const standing = standingCount(game);
   const ranked = standings(game);
+  const hues = huesFor(game.fighters.filter((f) => f.id !== YOU).map((f) => f.id));
   // The panels are measured only when the order changes or someone goes out, not on every tick of the clock.
   const order = ranked.map((f) => `${f.id}${f.out ? "!" : ""}`).join(" ");
 
@@ -122,6 +124,7 @@ export function Board({ game, round, waiting }: Props) {
               bot={!!f.nerve}
               live={!!f.live && f.id !== YOU}
               you={f.id === YOU}
+              hue={f.id === YOU ? undefined : hues.get(f.id)}
               text={text}
               tone={tone}
               g={gain(f, game.price)}
@@ -135,7 +138,7 @@ export function Board({ game, round, waiting }: Props) {
 }
 
 // One player. It pulses as they spring into a call, flashes and dims when they go out, and shines as you climb or someone takes the lead.
-const Panel = memo(function Panel({ id, place, name, role, bot, live, you, text, tone, g, title }: Seat) {
+const Panel = memo(function Panel({ id, place, name, role, bot, live, you, hue, text, tone, g, title }: Seat) {
   const card = useRef<HTMLDivElement>(null);
   const ring = useRef<HTMLElement>(null);
   const flash = useRef<HTMLElement>(null);
@@ -165,7 +168,10 @@ const Panel = memo(function Panel({ id, place, name, role, bot, live, you, text,
           <Swap text={String(place)} n={place} />
         </span>
         <span className={s.who}>
-          <span className={s.name}>{name}</span>
+          <span className={s.name}>
+            {hue && <i className={s.hue} style={{ background: hue }} aria-hidden="true" />}
+            {name}
+          </span>
           <span className={s.tags}>
             <small className={cx(s.hero, s[role])}>{ROLES[role].hero}</small>
             {bot && <small className={s.bot}>bot</small>}

@@ -89,8 +89,7 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
 - **The give up button** shows what you would walk away with right now, after every fee: Strike's fee to
   get in, its taker fee for closing at the market, and the builder fee when one is set. It starts below
   zero, so holding on is the default. **Your funds** are what you have, the way Strike shows equity. A
-  thundercloud closes as a maker and earns the rebate instead. A line on the field marks where giving
-  up starts to pay, fees and all.
+  thundercloud closes as a maker and earns the rebate instead.
 - **K.O.** Calls are knocked out where Strike would liquidate them. The further the kids walk back through
   your ghosts the fainter they get, and at the K.O. price they're gone: it takes your whole stack and you're out.
 - **No one is put out for waiting.** Rounds only raise the floor on power; nobody is eliminated at a

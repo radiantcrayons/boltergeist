@@ -138,6 +138,16 @@
   text-shadow: 0 0 10px rgba(255, 225, 74, 0.6);
 }
 
+.hue {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35);
+  vertical-align: 1px;
+}
+
 .who {
   display: flex;
   flex-direction: column;
