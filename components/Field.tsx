@@ -23,9 +23,6 @@ type Props = {
   mark: number | null;
   tickSize: number;
   reach: number;
-  span: { from: number; to: number };
-  // Each new round from the second: when it starts, and the least power it allows.
-  rounds: { at: number; round: number; floor: number }[];
   yours: Yours;
   // Which ghost you are: it sets their look, and their size is your stake's.
   role: Role;
@@ -1119,7 +1116,7 @@ export function Field(props: Props) {
       field.drawImage(l, 0, 0);
       field.restore();
     };
-    const { candles, intervalMs, mark, tickSize, reach, span, rounds, yours, role, walls = [], blasts = [], marks, pins = [], pick, coin } = latest.current;
+    const { candles, intervalMs, mark, tickSize, reach, yours, role, walls = [], blasts = [], marks, pins = [], pick, coin } = latest.current;
     const kind = GHOST_KIND[role];
     // On the field the stakes' sizes are closer together than in the portraits, so even a wisp stands out.
     const scale = FIELD_SIZE[kind];
@@ -1335,12 +1332,6 @@ export function Field(props: Props) {
     }
     stamp();
 
-    // The day's lines on the ground: the haunt's start, each new round, the final bell.
-    for (const [t, color] of [[span.from, COLORS.volt], ...rounds.map((r) => [r.at, "#f8a23a"] as const), [span.to, COLORS.volt]] as const) {
-      const x = X(t);
-      if (x >= ext.x0 && x <= ext.x1) line(ctx, S(x, ext.y0), S(x, ext.y1), color, 2, [8, 6]);
-    }
-
     // A line across the ground where you'd be knocked out.
     if (yours.call && onMap(yOf(yours.call.koAt))) {
       const yk = yOf(yours.call.koAt);
@@ -1428,9 +1419,6 @@ export function Field(props: Props) {
       if (!sp || bare(tx, ty)) continue;
       blit(ctx, sp, q);
     }
-    // The future is haze: nobody knows where they'll walk.
-    poly(ctx, [S(0.5, ext.y0), S(ext.x1 + 1, ext.y0), S(ext.x1 + 1, ext.y1), S(0.5, ext.y1)], css(CLAY.haze, 0.22));
-
     // Your thundercloud: it keeps pace with the kids over your line and strikes the line again and again, each strike
     // leaving a scorch that the field carries off behind them, so the price it waits for is marked out on the ground.
     const STRIKE_MS = 1300;
@@ -2057,17 +2045,6 @@ export function Field(props: Props) {
     // in front of them.
     ctx = layer(writing);
 
-    // The day's markers, laid along their lines of time: the haunt's start, each new round and its floor, the final bell.
-    for (const [t, label, color] of [
-      [span.from, "HAUNTING BEGINS", COLORS.volt],
-      ...rounds.map((r) => [r.at, `ROUND ${r.round}  ${r.floor}X FLOOR`, "#f8a23a"] as const),
-      [span.to, "FINAL BELL", COLORS.volt],
-    ] as const) {
-      const x = X(t);
-      if (x < ext.x0 || x > ext.x1 || Math.abs(x) < 1.6) continue;
-      marking(label, x - 0.12, y0 + 2.6, 0.3, color, { up: true });
-    }
-
     // Who's been knocked out, where it happened.
     for (const mk of marks) {
       const x = X(mk.t);
@@ -2104,30 +2081,17 @@ export function Field(props: Props) {
     // The price, marked on the ground just south of the kids' feet.
     marking(fmt.price(target, tickSize), 0, y0 + 1.05, 0.46, COLORS.volt, { align: "center" });
 
-    // The clock, laid along the line of time the kids stand on, down in the field's south west corner: to the start in the lobby, then
-    // to the next round, then to the bell.
-    const nextAt = now < span.from ? span.from : (rounds.find((r) => r.at > now)?.at ?? span.to);
-    const left = nextAt - now;
-    if (now < span.to && !(now < span.from && left <= 10_000)) {
-      const lobby = now < span.from;
-      const xl = -0.5;
-      const edge = 28 + 18 * WORDS;
-      const yl = Math.min(xl + (v.OX - edge) / A, (2 * (v.h - edge - v.OY)) / A - xl);
-      const hurry = !lobby && nextAt === span.to && left < 10_000;
-      const big = lobby ? 1.25 : 0.95;
-      const color = hurry && Math.floor(at / 250) % 2 ? COLORS.down : COLORS.volt;
-      ctx.save();
-      ctx.globalCompositeOperation = "lighter";
-      ctx.setLineDash([6, 8]);
-      ctx.strokeStyle = "rgba(255, 225, 74, 0.22)";
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(S(0, ext.y1).x, S(0, ext.y1).y);
-      ctx.lineTo(S(0, y0 + 1.5).x, S(0, y0 + 1.5).y);
-      ctx.stroke();
-      ctx.restore();
-      marking(fmt.clock(left), xl, yl, big, color, { up: true, weight: 400 });
-    }
+    // A faint line of now, through the kids and on south of them.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.setLineDash([6, 8]);
+    ctx.strokeStyle = "rgba(255, 225, 74, 0.22)";
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(S(0, ext.y1).x, S(0, ext.y1).y);
+    ctx.lineTo(S(0, y0 + 1.5).x, S(0, y0 + 1.5).y);
+    ctx.stroke();
+    ctx.restore();
 
     const hovered = hover.current ? priceUnder(hover.current.x, hover.current.y) : null;
     ctx = field;

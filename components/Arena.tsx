@@ -278,7 +278,10 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     ...(me.call && { call: { side: me.call.side, entry: me.call.entry, at: me.call.at, power: me.call.power, count: COUNTS[fear], maker: !!me.call.maker, koAt: me.call.koAt, move: moveOf(me.call, game.price) } }),
     ...(flag !== undefined && { flag: { price: flag, banks: me.call ? valueOf(me.call, flag, STRIKE.maker) - me.call.stake : undefined, ahead: flagAhead?.orders } }),
   };
-  const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => ({ at: roundEnds(game, r), round: r + 2, floor: kind.floors[r + 1] }));
+  const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => roundEnds(game, r));
+  // What's next on the clock: the start in the lobby, then each new round, then the final bell.
+  const nextAt = waiting ? game.startsAt : (steps.find((t) => t > nowMs) ?? game.endsAt);
+  const hurry = !waiting && nextAt === game.endsAt && nextAt - nowMs < 10_000;
   const away = koDistance(me.call ?? opening("long", charge, game.price, Math.max(me.cash, 1), nowMs));
 
   return (
@@ -310,8 +313,6 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             mark={mark?.p ?? null}
             tickSize={tickSize}
             reach={kind.reach}
-            span={{ from: game.startsAt, to: game.endsAt }}
-            rounds={steps}
             yours={yours}
             role={me.role}
             walls={walls}
@@ -322,6 +323,12 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             pick={pick}
             onPick={onPick}
           />
+        {!game.over && nowMs < game.endsAt && !(waiting && count <= 10) && (
+          <div className={`timer ${hurry ? "hurry" : ""}`}>
+            <small>{waiting ? "the haunting starts in" : nextAt === game.endsAt ? "final bell in" : `round ${round + 2} starts in`}</small>
+            <b>{fmt.clock(nextAt - nowMs)}</b>
+          </div>
+        )}
         {waiting && count <= 10 && (
           <div key={count} className="count" aria-hidden="true">
             <b>{count}</b>
