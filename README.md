@@ -122,7 +122,7 @@ game table configured, or the server down, every haunt is you and nine bots.
 
 ## Going live
 
-Switch the header from **paper** to **live** and connect:
+Switch the header from **paper** to **testnet** or **mainnet** and connect:
 
 - **A wallet.** Ethereum (MetaMask, Rabby, Coinbase), Solana (Phantom, Solflare) or Cardano (Eternl, Lace,
   Nami and friends). Boltergeist makes a trading key in your browser, you sign one message, and Strike's
@@ -147,7 +147,13 @@ resting and closes what's open. A position Strike liquidates knocks you out of t
 bots stay pretend. Boltergeist adds no fee of its own to anything.
 
 Every request is signed in the browser with Ed25519 and sent straight to Strike: there is no server in
-between holding keys.
+between holding keys. The trading key is made with the browser's own Web Crypto as a key that can't be read
+back, and kept in IndexedDB; a browser without Ed25519 in Web Crypto keeps the raw key there instead, and the
+connect window says so. A pasted API key is forgotten after 12 hours.
+
+The site's Content Security Policy lets it talk only to itself and Strike's API, and refuses to be framed,
+since a click on the field places a real order. Scripts may run inline, because the pages are prerendered
+without nonces; nothing on the site writes HTML from data.
 
 ## How it uses Strike
 

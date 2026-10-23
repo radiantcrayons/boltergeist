@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "node --test lib/game/*.test.ts lib/live/*.test.ts",
     "test:db": "node --test lib/server/*.test.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit --incremental false"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "3.1151.0",

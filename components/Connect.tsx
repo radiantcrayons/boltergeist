@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import * as fmt from "@/lib/format";
+import { lockedKeys } from "@/lib/live/keys";
 import { BUILDER, viaKey, viaWallet, type Balance, type Session } from "@/lib/live/session";
 import { detect, short, type Wallet } from "@/lib/live/wallets";
 import { NETWORK, STRIKE_APP } from "@/lib/strike";
@@ -25,6 +26,8 @@ export function Connect({ session, balance, onSession, onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [key, setKey] = useState("");
   const [showKey, setShowKey] = useState(!BUILDER.code);
+  const [locked, setLocked] = useState(true);
+  useEffect(() => void lockedKeys().then(setLocked), []);
 
   useEffect(() => {
     const look = () => setWallets(detect());
@@ -62,6 +65,7 @@ export function Connect({ session, balance, onSession, onClose }: Props) {
         </button>
         <h2>{session ? "your Strike account" : "go live on Strike"}</h2>
         <p className={`network ${NETWORK}`}>{NETWORK === "testnet" ? "Strike testnet: test money only" : "Strike mainnet: real money"}</p>
+        {!locked && <p className="dim small">This browser can&apos;t lock a trading key away, so it keeps the key in its own storage as it is. Disconnect when you&apos;re done on a shared computer.</p>}
 
         {session ? (
           <div className="linked">

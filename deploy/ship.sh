@@ -14,7 +14,7 @@ if ! git diff --quiet HEAD; then
   exit 1
 fi
 
-npx tsc --noEmit
+npx tsc --noEmit --incremental false
 if [[ -d infra/node_modules ]]; then (cd infra && npx tsc --noEmit); fi
 git ls-files -z -- '*.ts' '*.tsx' '*.mjs' | xargs -0 npx eslint --no-warn-ignored
 npm test

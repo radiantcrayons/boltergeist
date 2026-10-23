@@ -70,6 +70,9 @@ const ED = { name: "Ed25519" } as const;
 // Ed25519 in the browser's own crypto, where the private key can be made impossible to read back. Older browsers sign with noble instead.
 const webEd = () => (native ??= crypto.subtle.generateKey(ED, false, ["sign", "verify"]).then(() => true, () => false));
 
+// Whether this browser can hold a trading key it can never give back as text.
+export const lockedKeys = () => webEd();
+
 export function keepKeysIn(v: Vault, webCrypto?: boolean) {
   vault = v;
   native = webCrypto === undefined ? null : Promise.resolve(webCrypto);
