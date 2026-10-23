@@ -452,6 +452,21 @@ const FIELD_SIZE: Record<GhostKind, number> = { wisp: 0.95, spectre: 1.1, polter
 const FRAMES = 8;
 // The kids walk a step behind the price, so their torch's beam reaches out to the coin's signal on the price itself.
 const KIDS_BACK = (KIDS_LEAD * 2.05) / 26;
+// The forest: thick behind the kids and to the north and south, with a wide cross kept clear for the play: a channel north and
+// south through the kids' column, from 3.5 tiles behind them to 3 ahead and out to the edges of the view, and a lane on east along
+// the price 4 rows either side. How likely a patch of ground is to hold something, from x tiles east of now and ry rows south of
+// the price, its edges feathered over FOREST_EDGE.
+const FOREST = 0.42;
+const FOREST_EDGE = 1.5;
+const outside = (x: number, y: number, x0: number, x1: number, y0: number, y1: number) => Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(y0 - y, 0, y - y1));
+function forest(x: number, ry: number) {
+  const channel = outside(x, ry, -KIDS_BACK - 3.5, -KIDS_BACK + 3, -7, 7);
+  const lane = outside(x, ry, -KIDS_BACK + 3, Infinity, -4, 4);
+  const u = clamp(Math.min(channel, lane) / FOREST_EDGE, 0, 1);
+  return FOREST * u * u * (3 - 2 * u);
+}
+// A tree standing in front of the play, on the screen, turns this see-through.
+const SEE_THROUGH = 0.25;
 // Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
 const WORDS = 1.45;
 // Every word on the field is set at one size, in tiles tall; the prices you've set sit a little see-through.
@@ -901,8 +916,8 @@ function tuftSprite(A: number, variant: number) {
 // What dresses one tile of ground, worked out from where it is alone: whether a grove may stand there, and the tufts, flowers,
 // ferns and stones scattered on it, with what each becomes on open ground and what in a grove.
 type Look = [kind: number, variant: number];
-type Tile = { i: number; j: number; grove: boolean; outer: boolean; deep: boolean; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
-type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean; outer: boolean; deep: boolean };
+type Tile = { i: number; j: number; roll: number; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
+type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean; roll: number };
 type Deco = { u: number; w: number; tile: Grove | null; plain: Sprite | null; wild: Sprite | null };
 const LOOKS = [tuftSprite, flowerSprite, fernSprite, cloverSprite, mushroomSprite, pebbleSprite];
 function tileAt(i: number, j: number): Tile {
@@ -931,10 +946,8 @@ function tileAt(i: number, j: number): Tile {
     const wild = look(0.5);
     if (plain || wild) items.push({ u: i + hash(i * 5 + j * 11 + t), w: j + hash(i * 13 + j * 7 + t), plain, wild });
   }
-  // Groves dot the whole field; the outer ones only grow away from the play, and the deep ones only far to the north and south,
-  // so the edges read as forest.
-  const g = hash(i * 17 + j * 131);
-  return { i, j, grove: g < 0.024, outer: g < 0.16, deep: g >= 0.075, ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
+  // Whether something grows here is how this roll stands against the forest where the tile is (forest), so it's settled per tile.
+  return { i, j, roll: hash(i * 17 + j * 131), ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
 }
 
 // A box on the screen in device pixels; boxes that touch are joined, so each part of the screen is laid down once.
@@ -964,7 +977,7 @@ function merged(list: Box[], W: number, H: number): Box[] {
 // What stands in front of the words on the ground: where it stands, how high it floats, how far it has risen out of the ground,
 // and its picture.
 type Shape = { c: HTMLCanvasElement; ox: number; oy: number; w: number; h: number };
-type Caster = { x: number; y: number; z?: number; tall?: number; shape: () => Shape };
+type Caster = { x: number; y: number; z?: number; tall?: number; grove?: boolean; shape: () => Shape };
 const shapeOf = (f: Figure, dpr: number): Shape => ({ c: f.canvas, ox: f.ox / dpr, oy: f.oy / dpr, w: f.w / dpr, h: f.h / dpr });
 // A figure's shape in danger red, made once per picture, laid over a ghost to flash it as a call goes wrong.
 const reds = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
@@ -1025,6 +1038,7 @@ export function Field(props: Props) {
   const soft = useRef<HTMLCanvasElement | null>(null);
   // How far into view each tall thing has faded, by its tile, so nothing pops in or out.
   const fades = useRef(new Map<string, number>());
+  const seeThrough = useRef(new Map<string, number>());
   const fadeAt = useRef(0);
   // Where each rival is shown, gliding after where they really are when they move.
   const glides = useRef(new Map<string, number>());
@@ -1147,7 +1161,7 @@ export function Field(props: Props) {
           t = tileAt(i, j);
           known.set(id, t);
         }
-        const grove = t.outer ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false, outer: !t.grove, deep: t.deep } : null;
+        const grove = t.roll < FOREST ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false, roll: t.roll } : null;
         if (grove) groves.push(grove);
         for (const it of t.items) low.push({ u: it.u, w: it.w, tile: grove, plain: art(it.plain), wild: art(it.wild) });
       }
@@ -1451,13 +1465,33 @@ export function Field(props: Props) {
     const fadeStep = clamp((at - fadeAt.current) / 320, 0, 1);
     fadeAt.current = at;
     if (fades.current.size > 6000) fades.current.clear();
+    if (seeThrough.current.size > 3000) seeThrough.current.clear();
+    // A tree standing in front of any of the play on the screen (a ghost, a grave, a hand or the kids behind it) eases see-through,
+    // so the game is never hidden. Asked as each is drawn, once everything has said where it stands.
+    let pieces: { d: number; x0: number; y0: number; x1: number; y1: number }[] | null = null;
+    const veiled = (id: string, d: number, x0: number, y0: number, w: number, h: number) => {
+      pieces ??= casters
+        .filter((c) => !c.grove)
+        .map((c) => {
+          const sh = c.shape();
+          const p = S(c.x, c.y, c.z ?? 0);
+          return { d: c.x + c.y, x0: p.x - sh.ox, y0: p.y - sh.oy, x1: p.x - sh.ox + sh.w, y1: p.y - sh.oy + sh.h };
+        });
+      // (the foot of its trunk aside, which covers little)
+      const over = pieces.some((b) => b.d < d && x0 < b.x1 && x0 + w > b.x0 && y0 < b.y1 && y0 + h * 0.85 > b.y0);
+      const was = seeThrough.current.get(id) ?? 1;
+      const veil = was + ((over ? SEE_THROUGH : 1) - was) * fadeStep;
+      if (veil > 0.995) seeThrough.current.delete(id);
+      else seeThrough.current.set(id, veil);
+      return veil;
+    };
     for (const tile of dec.groves) {
       tile.on = false;
       const x = tile.i - nowX + tile.ox;
       const y = tile.j + 0.5 - g.cy + R / 2;
       if (!seen(S(x, y), 2.6 * A)) continue;
       const id = `${tile.i}|${tile.j}`;
-      const want = clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? (overSet(x, y) ? 0.12 : 1) : 0;
+      const want = tile.roll < forest(x, y - y0) && clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? (overSet(x, y) ? 0.12 : 1) : 0;
       const was = fades.current.get(id) ?? 0;
       const shown = was + (want - was) * fadeStep;
       if (shown < 0.01 && want === 0) {
@@ -1465,13 +1499,8 @@ export function Field(props: Props) {
         continue;
       }
       fades.current.set(id, shown);
-      // Near the kids and the play around them everything tall goes faint, so the game is never hidden behind it; out past the
-      // play the outer groves grow in.
-      const d = Math.hypot(x + KIDS_BACK, y - y0);
-      const grown = tile.deep ? clamp((Math.abs(y - y0) - 5) / 2, 0, 1) : tile.outer ? clamp((d - 6) / 1.5, 0, 1) : 1;
-      if (grown <= 0) continue;
       tile.on = true;
-      const faint = (0.15 + 0.85 * clamp((d - 3) / 3, 0, 1)) * grown * shown;
+      const faint = shown;
       const { pick, variant } = tile;
       if (pick < 0.62) {
         const size = variant === 10 ? 0.7 : variant % 3 === 0 ? 1.15 : 1;
@@ -1480,10 +1509,10 @@ export function Field(props: Props) {
           const p = S(x, y);
           blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * faint);
         });
-        if (faint > 0.5) casters.push({ x, y, shape: () => shapeOf(f, dpr) });
+        if (faint > 0.5) casters.push({ x, y, grove: true, shape: () => shapeOf(f, dpr) });
         put(x, y, () => {
           const p = S(x, y);
-          ctx.globalAlpha = faint;
+          ctx.globalAlpha = faint * veiled(id, x + y, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
           ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
           ctx.globalAlpha = 1;
         });
@@ -1493,8 +1522,11 @@ export function Field(props: Props) {
           const p = S(x, y);
           blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * faint);
         });
-        if (faint > 0.5) casters.push({ x, y, shape: () => sp });
-        put(x, y, () => blit(ctx, sp, S(x, y), faint));
+        if (faint > 0.5) casters.push({ x, y, grove: true, shape: () => sp });
+        put(x, y, () => {
+          const p = S(x, y);
+          blit(ctx, sp, p, faint * veiled(id, x + y, p.x - sp.ox, p.y - sp.oy, sp.w, sp.h));
+        });
       } else if (pick < 0.83) put(x, y, () => blit(ctx, stumpSprite(A, variant), S(x, y), faint));
       else if (pick < 0.92) {
         put(x, y, () => blit(ctx, pumpkinSprite(A, variant), S(x, y), faint));
