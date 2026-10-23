@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { JetBrains_Mono, Lilita_One, Rubik, Rubik_Wet_Paint } from "next/font/google";
 import "./globals.css";
 
@@ -17,7 +18,10 @@ export const viewport: Viewport = { themeColor: "#06080b" };
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable} ${brand.variable}`}>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
