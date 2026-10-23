@@ -502,17 +502,14 @@ const FIELD_SIZE: Record<GhostKind, number> = { wisp: 0.95, spectre: 1.1, polter
 const FRAMES = 8;
 // The kids walk a step behind the price, so their torch's beam reaches out to the coin's signal on the price itself.
 const KIDS_BACK = (KIDS_LEAD * 2.05) / 26;
-// The forest: thick behind the kids and to the north and south, with a wide cross kept clear for the play: a channel north and
-// south through the kids' column, from 3.5 tiles behind them to 3 ahead and out to the edges of the view, and a lane on east along
-// the price 4 rows either side. How likely a patch of ground is to hold something, from x tiles east of now and ry rows south of
-// the price, its edges feathered over FOREST_EDGE.
+// The forest: only in bands far to the north and south, the field open FOREST_OPEN rows either side of the price all the way
+// across, ahead for the play and behind for the trail the price has walked. How likely a patch of ground is to hold something,
+// from how many rows south of the price it is (ry), its edge feathered over FOREST_EDGE.
 const FOREST = 0.42;
-const FOREST_EDGE = 1.5;
-const outside = (x: number, y: number, x0: number, x1: number, y0: number, y1: number) => Math.hypot(Math.max(x0 - x, 0, x - x1), Math.max(y0 - y, 0, y - y1));
-function forest(x: number, ry: number) {
-  const channel = outside(x, ry, -KIDS_BACK - 3.5, -KIDS_BACK + 3, -7, 7);
-  const lane = outside(x, ry, -KIDS_BACK + 3, Infinity, -4, 4);
-  const u = clamp(Math.min(channel, lane) / FOREST_EDGE, 0, 1);
+const FOREST_OPEN = 6.5;
+const FOREST_EDGE = 0.8;
+function forest(ry: number) {
+  const u = clamp((Math.abs(ry) - FOREST_OPEN) / FOREST_EDGE, 0, 1);
   return FOREST * u * u * (3 - 2 * u);
 }
 // A tree standing in front of the play, on the screen, turns this see-through.
@@ -1541,7 +1538,7 @@ export function Field(props: Props) {
       const y = tile.j + 0.5 - g.cy + R / 2;
       if (!seen(S(x, y), 2.6 * A)) continue;
       const id = `${tile.i}|${tile.j}`;
-      const want = tile.roll < forest(x, y - y0) && clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? (overSet(x, y) ? 0.12 : 1) : 0;
+      const want = tile.roll < forest(y - y0) && clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? (overSet(x, y) ? 0.12 : 1) : 0;
       const was = fades.current.get(id) ?? 0;
       const shown = was + (want - was) * fadeStep;
       if (shown < 0.01 && want === 0) {
