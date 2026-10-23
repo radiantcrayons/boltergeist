@@ -28,7 +28,7 @@ export class Tables extends Construct {
     this.arenas = new dynamodb.TableV2(this, "Arenas", {
       ...keys,
       tableName: "boltergeist-arenas",
-      billing: dynamodb.Billing.onDemand({ maxReadRequestUnits: 100, maxWriteRequestUnits: 25 }),
+      billing: dynamodb.Billing.onDemand({ maxReadRequestUnits: 400, maxWriteRequestUnits: 100 }),
       deletionProtection: true,
       removalPolicy: RemovalPolicy.RETAIN,
     });

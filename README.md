@@ -199,7 +199,7 @@ The app runs on Vercel. The arena's tables are in AWS, in one CDK stack, `Bolter
 
 | Resource | Name | Notes |
 | --- | --- | --- |
-| DynamoDB | `boltergeist-arenas` | Production. Paid per request, at most 100 reads and 25 writes a second: past that requests are throttled, not charged. Each haunt's items go a day after it ends |
+| DynamoDB | `boltergeist-arenas` | Production. Paid per request, at most 400 reads and 100 writes a second: past that requests are throttled, not charged. Each haunt's items go a day after it ends |
 | DynamoDB | `boltergeist-arenas-dev` | Local dev and Vercel previews |
 | IAM role | `boltergeist-vercel-production` | Assumed by production's functions with Vercel's OIDC token: no AWS keys are stored on Vercel |
 | IAM role | `boltergeist-vercel-preview` | The same for previews and `vercel dev`, on the dev table |
