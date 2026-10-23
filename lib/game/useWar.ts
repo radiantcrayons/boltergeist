@@ -267,9 +267,30 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     return () => clearInterval(timer);
   }, [update]);
 
-  const announce = useCallback((g: Game, m: Omit<Move, "at" | "who">) => {
-    if (g.me) tell(g.id, g.me, m).catch((err: Error) => setError(err instanceof Wait ? err.message : `The game missed that: ${err.message}`));
-  }, []);
+  const announce = useCallback(
+    (g: Game, m: Omit<Move, "at" | "who">) => {
+      if (!g.me) return;
+      tell(g.id, g.me, m).catch((err: Error) => {
+        if (err instanceof Wait) return setError(err.message);
+        // Turned away, not lost on the way: the game server doesn't have it, so this game lets it go too, and nothing that hung on
+        // it is sent after it. A live order it left on Strike comes off with it.
+        const refused = err instanceof Full || err.constructor === Error;
+        if (refused && m.what === "trap") {
+          update(g.id, (x) => (yours(x)?.trap?.price === m.price ? pullTrap(x) : x));
+          return setError("The price moved onto your graves before they went in: dig again");
+        }
+        if (refused && m.what === "flag" && m.price !== undefined) {
+          update(g.id, (x) => {
+            const f = yours(x);
+            return f?.trap?.flag === m.price || f?.call?.flag === m.price ? plantFlag(x, undefined, Date.now()) : x;
+          });
+          return setError("The price moved past your thundercloud before it went in: summon it again");
+        }
+        setError(`The game missed that: ${err.message}`);
+      });
+    },
+    [update],
+  );
 
   // Your graves springing and thunderclouds striking happen here by the price: the game server hears of them too.
   const told = useRef(new Map<string, number>());
