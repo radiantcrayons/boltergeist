@@ -64,6 +64,9 @@ export async function viaWallet(wallet: Wallet): Promise<Session> {
     return await linked(wallet, connected, keys);
   } catch (err) {
     void forget(keys);
+    // The account that owns a builder code can't sign in through it, so the game's own wallet has to come in with an API key.
+    if (err instanceof Error && /own builder code/i.test(err.message))
+      throw new Error("This wallet's Strike account runs this game, so it can't sign in through it. Use another wallet, or an API key from Strike's API wallets page");
     throw err;
   }
 }
