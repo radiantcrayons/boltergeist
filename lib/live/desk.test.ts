@@ -34,7 +34,7 @@ class FakeStrike implements Exchange {
     this.sent.push(`limit ${symbol} ${side} ${size} at ${price}${opts.postOnly ? " post-only" : ""}${opts.reduceOnly ? " reduce-only" : ""}`);
     const o = this.add(clientId, side, Number(size), Number(price), !!opts.reduceOnly, "open");
     if (side === "buy" ? o.price < this.price : o.price > this.price) return;
-    if (opts.postOnly) o.Status = "canceled";
+    if (opts.postOnly) Object.assign(o, { Status: "canceled", CloseReason: "order_would_match_immediately" });
     else this.fill(o, this.price, false);
   }
   async cancel(_symbol: string, orderId: number) {
@@ -164,7 +164,7 @@ test("a trap rests on Strike as a post-only limit order, on a tick away from the
 
 test("a trap the price is already through is turned away rather than filled as a taker", async () => {
   const strike = new FakeStrike();
-  await assert.rejects(lay(strike, { ...trap, price: 100_500 }, 1), /turned the ambush away/);
+  await assert.rejects(lay(strike, { ...trap, price: 100_500 }, 1), /turned your graves away: Strike's order book already has orders past that price/);
   assert.equal(strike.held, null);
   strike.held = { side: "long", size: 1, entry: 1, koAt: 0, iso: 1, upnl: 0 };
   await assert.rejects(lay(strike, trap, 1), /already hold/);

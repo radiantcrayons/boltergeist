@@ -5,7 +5,7 @@ export type Side = "long" | "short";
 
 export type Held = { side: Side; size: number; entry: number; koAt: number; iso: number; upnl: number };
 
-export type Order = { ID: number; Status: string; Filled?: string; Price?: string; EventTimestamp?: number };
+export type Order = { ID: number; Status: string; Filled?: string; Price?: string; EventTimestamp?: number; CloseReason?: string };
 
 export type Dealt = { price: number; size: number; fee: number; maker: boolean; at: number };
 
@@ -25,6 +25,17 @@ export class Refused extends Error {}
 const decimals = (step: number) => Math.max(0, -Math.floor(Math.log10(step) + 1e-9));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const GONE = ["canceled", "rejected", "expired"];
+// Why Strike turned an order away, in words: its own reason code, or the status when it gives none.
+const REASONS: Record<string, string> = {
+  order_would_match_immediately: "Strike's order book already has orders past that price, so it would trade at once: set it further from the price",
+  insufficient_balance: "there isn't enough in your Strike account for it",
+  order_less_than_min_size: "it's under Strike's smallest order: add power",
+};
+export const why = (o: Order) => {
+  const code = o.CloseReason?.trim();
+  if (code) return REASONS[code] ?? code.replace(/_/g, " ");
+  return o.Status === "canceled" ? "Strike cancelled it" : `Strike ${o.Status} it`;
+};
 export const filledOf = (o: Order | null) => Number(o?.Filled) || 0;
 // On one of the market's ticks, rounded away from the price, so a trap or flag can't land on the wrong side of where it was set.
 const onTick = (price: number, tick: number, up: boolean) => {
@@ -44,7 +55,7 @@ export async function filled(ex: Exchange, symbol: string, clientId: string, wai
   for (let i = 0; i < 25; i++) {
     const order = await ex.order(symbol, clientId);
     if (order?.Status === "filled") return;
-    if (order && ["canceled", "rejected", "expired"].includes(order.Status)) throw new Refused(`Strike ${order.Status === "canceled" ? "cancelled" : order.Status} the order`);
+    if (order && GONE.includes(order.Status)) throw new Refused(`Strike turned the order away: ${why(order)}`);
     await sleep(waitMs);
   }
   throw new Error("Strike hasn't filled the order yet: check your position on Strike");
@@ -140,7 +151,7 @@ export async function lay(
   await ready(ex, market, power);
   await ex.limit(market.symbol, buy ? "buy" : "sell", size.toFixed(decimals(market.stepSize)), price.toFixed(decimals(market.tickSize)), clientId, { postOnly: true });
   const o = await placed(ex, market.symbol, clientId, waitMs);
-  if (GONE.includes(o.Status) && !filledOf(o)) throw new Refused("Strike turned the ambush away: the price was already through it");
+  if (GONE.includes(o.Status) && !filledOf(o)) throw new Refused(`Strike turned your graves away: ${why(o)}`);
   return { live: clientId, price, size };
 }
 
@@ -188,7 +199,7 @@ export async function plant(ex: Exchange, flag: { market: Market; price: number;
   const price = onTick(flag.price, market.tickSize, sell);
   await ex.limit(market.symbol, sell ? "sell" : "buy", held.size.toFixed(decimals(market.stepSize)), price.toFixed(decimals(market.tickSize)), clientId, { reduceOnly: true });
   const o = await placed(ex, market.symbol, clientId, waitMs);
-  if (GONE.includes(o.Status) && !filledOf(o)) throw new Refused("Strike turned the flag away");
+  if (GONE.includes(o.Status) && !filledOf(o)) throw new Refused(`Strike turned your thundercloud away: ${why(o)}`);
   return { live: clientId, price };
 }
 
