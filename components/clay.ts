@@ -529,17 +529,30 @@ function kids(stride: number, strides: number): Part[] {
   return parts;
 }
 
-export const paintKids = (px: number, stride: number, strides: number) => render(kids(stride, strides), px, 19, 15, 33);
+// Turned by an angle about the up axis: east as they walk, toward the south for a positive turn and the north for a negative one.
+export function paintKids(px: number, stride: number, strides: number, turn = 0): Figure {
+  const parts = kids(stride, strides);
+  if (!turn) return render(parts, px, 19, 15, 33);
+  const r = yaw(turn);
+  return render(
+    parts.map((q) => ({ ...q, c: turned(r, q.c), m: times(r, q.m) })),
+    px,
+    19,
+    18,
+    36,
+  );
+}
+const spun = (v: V, turn: number): V => (turn ? turned(yaw(turn), v) : v);
 
 // The torch's lens from the children's feet, in pixels, for its beam.
-export function kidsTorch(px: number) {
-  const [x, y, z] = kidsTorch3(0.3 * (CHILDREN[1].tall / 15)).tip;
+export function kidsTorch(px: number, turn = 0) {
+  const [x, y, z] = spun(kidsTorch3(0.3 * (CHILDREN[1].tall / 15)).tip, turn);
   return { x: (x - y) * px, y: ((x + y) / 2 - z) * px };
 }
 
 // The lantern's place from the children's feet, in pixels, for its glow.
-export function kidsLantern(px: number) {
-  const [x, y, z] = kidsLantern3(0.3 * (CHILDREN[0].tall / 15)).lamp;
+export function kidsLantern(px: number, turn = 0) {
+  const [x, y, z] = spun(kidsLantern3(0.3 * (CHILDREN[0].tall / 15)).lamp, turn);
   return { x: (x - y) * px, y: ((x + y) / 2 - z) * px };
 }
 

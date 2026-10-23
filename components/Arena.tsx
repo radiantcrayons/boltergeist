@@ -449,10 +449,17 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
               </button>
             </>
           ) : game.over ? null : (
-            <div className="in hints">
-              {trap?.side === "short" ? <span className="flag">click below them for a thundercloud</span> : <span className="good">click below them to {trap ? "move your graves" : "go long"}</span>}
-              {trap?.side === "long" ? <span className="flag">click above them for a thundercloud</span> : <span className="bad">click above them to {trap ? "move your graves" : "go short"}</span>}
-            </div>
+            <>
+              <div className="in hints">
+                {trap?.side === "short" ? <span className="flag">click below them for a thundercloud</span> : <span className="good">click below them to {trap ? "move your graves" : "go long"}</span>}
+                {trap?.side === "long" ? <span className="flag">click above them for a thundercloud</span> : <span className="bad">click above them to {trap ? "move your graves" : "go short"}</span>}
+              </div>
+              {trap && (
+                <button className="plain clear" onClick={() => war.pull(game.id)} disabled={!!war.busy} title="Take your graves and any thundercloud away, to dig on the other side (Esc)">
+                  clear graves
+                </button>
+              )}
+            </>
           )}
         </div>
       </section>

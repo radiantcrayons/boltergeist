@@ -480,7 +480,11 @@ function beam() {
 }
 const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px));
 const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant));
-const kidsAt = (px: number, stride: number) => figure(`kids|${px}|${stride}`, () => paintKids(px, stride, STRIDES));
+// The kids turn as they climb and drop: sixteen steps across the half turn from north through east to south, plus straight east.
+const KID_TURNS = 16;
+const kidTurn = (i: number) => (i / KID_TURNS - 0.5) * Math.PI;
+const kidsKey = (px: number, stride: number, turn: number) => `kids|${px}|${stride}|${turn}`;
+const kidsAt = (px: number, stride: number, turn = KID_TURNS / 2) => figure(kidsKey(px, stride, turn), () => paintKids(px, stride, STRIDES, kidTurn(turn)));
 const ghostKey = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) => `ghost|${kind}|${body}|${px}|${frame}|${boo ? 1 : 0}|${turn}`;
 const ghostAt = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn = 0) =>
   figure(ghostKey(kind, body, px, frame, boo, turn), () => paintSpook(kind, body, px, frame, FRAMES, boo, turn));
@@ -499,6 +503,17 @@ function bake(d?: IdleDeadline) {
   }
   if (toBake.size) idle(bake);
   else baking = false;
+}
+function kidsSoon(px: number, turn: number) {
+  for (let stride = 0; stride < STRIDES; stride++) {
+    const key = kidsKey(px, stride, turn);
+    if (figures.has(key) || toBake.has(key)) continue;
+    toBake.set(key, () => paintKids(px, stride, STRIDES, kidTurn(turn)));
+  }
+  if (toBake.size && !baking) {
+    baking = true;
+    idle(bake);
+  }
 }
 function ghostSoon(kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) {
   const key = ghostKey(kind, body, px, frame, boo, turn);
@@ -988,7 +1003,7 @@ export function Field(props: Props) {
     hands: Map<string, Hand>;
     col: number;
     struck: number;
-    gait: { walked: number; y: number; at: number };
+    gait: { walked: number; y: number; at: number; vx: number; vy: number; turn: number; pose: number };
     rain: Float32Array | null;
   }>({
     past: [],
@@ -998,7 +1013,7 @@ export function Field(props: Props) {
     hands: new Map(),
     col: 0,
     struck: 0,
-    gait: { walked: 0, y: 0, at: 0 },
+    gait: { walked: 0, y: 0, at: 0, vx: 0, vy: 0, turn: 0, pose: KID_TURNS / 2 },
     rain: null,
   });
   const grass = useRef<{ c: HTMLCanvasElement | null; x0: number; y0: number; w: number; h: number; n: number }>({ c: null, x0: 0, y0: 0, w: 0, h: 0, n: 0 });
@@ -1928,6 +1943,11 @@ export function Field(props: Props) {
     const dt = gait.at ? Math.min(at - gait.at, 100) : 0;
     const moved = Math.hypot(dt / intervalMs, wy - gait.y);
     gait.walked += moved;
+    // Which way they face, from how they've been moving lately: east as they walk, turned toward a climb or a drop.
+    if (dt > 0) {
+      gait.vx += (dt / intervalMs - gait.vx) * 0.06;
+      gait.vy += (wy - gait.y - gait.vy) * 0.06;
+    }
     gait.y = wy;
     gait.at = at;
     const still = reduced() || moved < dt * 0.00005;
@@ -1939,7 +1959,17 @@ export function Field(props: Props) {
       blob(ctx, p.x, p.y, 0.8 * A, 0.36 * A, [92, 108, 136], 0.55);
     });
     const jump = Math.sin(spooked * Math.PI) * 14 * k;
-    const kidsNow = kidsAt(Math.round(2.05 * k * dpr * 10) / 10, strideNow);
+    const kidPx = Math.round(2.05 * k * dpr * 10) / 10;
+    const heading = reduced() ? 0 : clamp(Math.atan2(gait.vy, Math.max(gait.vx, 1e-9)), -Math.PI / 2, Math.PI / 2);
+    gait.turn += (heading - gait.turn) * Math.min(1, dt / 260);
+    const toward = Math.round((gait.turn / Math.PI + 0.5) * KID_TURNS);
+    // A pose not made yet is made between frames; until it's ready they keep the one they have.
+    if (toward !== gait.pose) {
+      if (figures.has(kidsKey(kidPx, strideNow, toward))) gait.pose = toward;
+      kidsSoon(kidPx, toward);
+    }
+    kidsSoon(kidPx, gait.pose);
+    const kidsNow = kidsAt(kidPx, strideNow, gait.pose);
     casters.push({ x: kx, y: y0, z: jump, shape: () => shapeOf(kidsNow, dpr) });
     let torch: Pt | null = null;
     put(kx, y0, () => {
@@ -1947,9 +1977,9 @@ export function Field(props: Props) {
       p.x += tremble;
       const f = kidsNow;
       ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
-      const lamp = kidsLantern(2.05 * k);
+      const lamp = kidsLantern(2.05 * k, kidTurn(gait.pose));
       glows.push({ p: { x: p.x + lamp.x, y: p.y + lamp.y }, r: 3.2 * A, rgb: "255, 196, 120", a: 0.5 });
-      const lens = kidsTorch(2.05 * k);
+      const lens = kidsTorch(2.05 * k, kidTurn(gait.pose));
       torch = { x: p.x + lens.x, y: p.y + lens.y };
       glows.push({ p: torch, r: 0.35 * A, rgb: "255, 236, 190", a: 0.7 });
     });
