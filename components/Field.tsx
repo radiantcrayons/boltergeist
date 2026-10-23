@@ -483,6 +483,21 @@ const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, 
 // The kids turn as they climb and drop: sixteen steps across the half turn from north through east to south, plus straight east.
 const KID_TURNS = 16;
 const kidTurn = (i: number) => (i / KID_TURNS - 0.5) * Math.PI;
+const kidPose = (turn: number) => Math.round((turn / Math.PI + 0.5) * KID_TURNS);
+// They face where the price is going before they walk there: the torch swings round first, the body follows the torch, and they
+// step off once they're mostly round, quicker the further round they are. A move smaller than a tick's noise doesn't turn them,
+// and they keep facing a climb or a drop a moment after each step, so a run of ticks doesn't flick them back east between steps.
+const TURN_NOISE = 0.12;
+const TURN_STEP = 500;
+const TURN_RELAX = 500;
+const TORCH_TURN = { ease: 35, rate: 1400 };
+const BODY_TURN = { ease: 70, rate: 720 };
+const WALK_ROUND = Math.PI / 4;
+// A turn eased toward an angle over a frame of dt ms, but never faster than rate degrees a second.
+const turnTo = (from: number, to: number, dt: number, { ease, rate }: { ease: number; rate: number }) => {
+  const most = (rate * Math.PI * dt) / 180_000;
+  return from + clamp((to - from) * (1 - Math.exp(-dt / ease)), -most, most);
+};
 const kidsKey = (px: number, stride: number, turn: number) => `kids|${px}|${stride}|${turn}`;
 const kidsAt = (px: number, stride: number, turn = KID_TURNS / 2) => figure(kidsKey(px, stride, turn), () => paintKids(px, stride, STRIDES, kidTurn(turn)));
 const ghostKey = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) => `ghost|${kind}|${body}|${px}|${frame}|${boo ? 1 : 0}|${turn}`;
@@ -1003,7 +1018,7 @@ export function Field(props: Props) {
     hands: Map<string, Hand>;
     col: number;
     struck: number;
-    gait: { walked: number; y: number; at: number; vx: number; vy: number; turn: number; pose: number };
+    gait: { walked: number; y: number; at: number; aim: number; torch: number; turn: number; pose: number; pace: number };
     rain: Float32Array | null;
   }>({
     past: [],
@@ -1013,7 +1028,7 @@ export function Field(props: Props) {
     hands: new Map(),
     col: 0,
     struck: 0,
-    gait: { walked: 0, y: 0, at: 0, vx: 0, vy: 0, turn: 0, pose: KID_TURNS / 2 },
+    gait: { walked: 0, y: 0, at: 0, aim: 0, torch: 0, turn: 0, pose: KID_TURNS / 2, pace: 1 },
     rain: null,
   });
   const grass = useRef<{ c: HTMLCanvasElement | null; x0: number; y0: number; w: number; h: number; n: number }>({ c: null, x0: 0, y0: 0, w: 0, h: 0, n: 0 });
@@ -1210,7 +1225,9 @@ export function Field(props: Props) {
       g.shown = target;
       g.cy = 0;
     }
-    g.shown = reduced() ? target : g.shown + (target - g.shown) * (1 - Math.exp(-Math.min(at - g.at, 50) / 110));
+    // The kids carry the price, and they turn to face a move before they make it: the price shown waits on how far round they are.
+    const pace = memory.current.gait.pace;
+    g.shown = reduced() ? target : g.shown + (target - g.shown) * (1 - Math.exp(-(Math.min(at - g.at, 50) * pace) / 110));
     const live = g.shown;
     g.lag = target - live;
     const worldY = (p: number) => (g.ref - p) / g.rowSize;
@@ -1952,11 +1969,6 @@ export function Field(props: Props) {
     const dt = gait.at ? Math.min(at - gait.at, 100) : 0;
     const moved = Math.hypot(dt / intervalMs, wy - gait.y);
     gait.walked += moved;
-    // Which way they face, from how they've been moving lately: east as they walk, turned toward a climb or a drop.
-    if (dt > 0) {
-      gait.vx += (dt / intervalMs - gait.vx) * 0.06;
-      gait.vy += (wy - gait.y - gait.vy) * 0.06;
-    }
     gait.y = wy;
     gait.at = at;
     const still = reduced() || moved < dt * 0.00005;
@@ -1969,9 +1981,19 @@ export function Field(props: Props) {
     });
     const jump = Math.sin(spooked * Math.PI) * 14 * k;
     const kidPx = Math.round(2.05 * k * dpr * 10) / 10;
-    const heading = reduced() ? 0 : clamp(Math.atan2(gait.vy, Math.max(gait.vx, 1e-9)), -Math.PI / 2, Math.PI / 2);
-    gait.turn += (heading - gait.turn) * Math.min(1, dt / 260);
-    const toward = Math.round((gait.turn / Math.PI + 0.5) * KID_TURNS);
+    // Which way they face: east as they walk, turned toward where the price is going from the gap still to walk (south a positive
+    // turn), read as a pace in rows a second against the ground's tile a candle.
+    const gap = worldY(target) - wy;
+    const pull = reduced() || Math.abs(gap) < TURN_NOISE ? 0 : gap / (TURN_STEP / 1000);
+    if (pull && (Math.sign(pull) !== Math.sign(gait.aim) || Math.abs(pull) >= Math.abs(gait.aim))) gait.aim = pull;
+    else gait.aim += (pull - gait.aim) * (1 - Math.exp(-dt / TURN_RELAX));
+    const heading = clamp(Math.atan2(gait.aim, 1000 / intervalMs), -Math.PI / 2, Math.PI / 2);
+    gait.torch = reduced() ? 0 : turnTo(gait.torch, heading, dt, TORCH_TURN);
+    gait.turn = reduced() ? 0 : turnTo(gait.turn, gait.torch, dt, BODY_TURN);
+    const round = clamp(1 - Math.abs(heading - gait.turn) / WALK_ROUND, 0, 1);
+    gait.pace = Math.abs(gap) < TURN_NOISE ? 1 : round * round * (3 - 2 * round);
+    const toward = kidPose(gait.turn);
+    kidsSoon(kidPx, kidPose(heading));
     // A pose not made yet is made between frames; until it's ready they keep the one they have.
     if (toward !== gait.pose) {
       if (figures.has(kidsKey(kidPx, strideNow, toward))) gait.pose = toward;
@@ -2108,7 +2130,8 @@ export function Field(props: Props) {
         glows.push({ p: { x: fx, y: fy }, r: 7, rgb: "222, 255, 150", a: 0.75 * blink * dry });
       }
     }
-    const lamp = S(0, y0);
+    // Where the torch lands, a step ahead of them: on the price itself while they walk east, swung round with the torch as they turn.
+    const lamp = S(kx + Math.cos(gait.torch) * KIDS_BACK, y0 + Math.sin(gait.torch) * KIDS_BACK);
     shine(ctx, lamp.x, lamp.y, 2.6 * A, 1.3 * A, "255, 186, 104", 0.3, false);
     // The coin, like a signal in the sky: a soft pool of lantern light on the ground under the kids with the market's mark cut out of it.
     const mark0 = coin ? signalOf(coin) : null;
