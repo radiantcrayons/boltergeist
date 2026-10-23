@@ -30,8 +30,11 @@ import {
   pullTrap,
   roundEnds,
   rulesFor,
+  sameGame,
   setTrap,
   settle,
+  SHARDS,
+  shardOf,
   standingCount,
   STRIKE,
   standings,
@@ -288,7 +291,7 @@ test("rivals do the same thing for everyone watching the same prices", () => {
 
 const p = (id: string, joinedAt: number, role: "soldier" | "commando" | "warlord" = "soldier") => ({ id, name: id, role, joinedAt });
 
-test("players take the seats: bots only fill what's left, and someone in after the start is one more", () => {
+test("players take the seats: bots only fill what's left, and someone in after the start takes the last bot's seat", () => {
   const a = arena("skirmish");
   const players = [p("ann", a.opensAt + 1000), p("bo", a.opensAt + 2000, "warlord")];
   let g = enter(a, "commando", 100, a.opensAt + 3000, { me: "me", players: [...players, { ...p("me", a.opensAt + 3000), role: "commando" }] });
@@ -296,11 +299,74 @@ test("players take the seats: bots only fill what's left, and someone in after t
   assert.equal(g.fighters.find((f) => f.id === "bo")?.stake, 250);
   g = advance(g, at(100), a.startsAt + GRACE + 1);
   assert.equal(g.fighters.length, 10);
-  assert.equal(g.fighters.filter((f) => f.nerve).length, 7);
+  const bots = g.fighters.filter((f) => f.nerve).map((f) => f.id);
+  assert.equal(bots.length, 7);
   const late: Log = { players: [...players, p("cy", a.startsAt + 5000)], moves: [] };
   g = heed(g, late, a.startsAt + 6000);
-  assert.equal(g.fighters.length, 11);
+  assert.equal(g.fighters.length, 10);
+  assert.deepEqual(
+    g.fighters.filter((f) => f.nerve).map((f) => f.id),
+    bots.slice(0, 6),
+  );
   assert.ok(g.feed.some((e) => e.what === "join" && e.who === "cy"));
+  const walkedIn = enter(a, "soldier", 100, a.startsAt + 9000, { me: "me", players: late.players });
+  assert.equal(walkedIn.fighters.length, 10);
+});
+
+test("a player with a ghost nobody knows is left out rather than breaking the game", () => {
+  const a = arena("battle");
+  const odd = { id: "odd", name: "odd", role: "constructor" as never, joinedAt: now - 1000 };
+  const g = enter(a, "commando", 100, now, { me: "me", players: [odd, p("ann", now - 2000)] });
+  assert.ok(!g.fighters.some((f) => f.id === "odd"));
+  assert.ok(g.fighters.every((f) => Number.isFinite(f.stake)));
+  assert.equal(heed(g, { players: [odd], moves: [] }, now + 1000).fighters.length, g.fighters.length);
+});
+
+test("other players' live calls and banks land at the arena's prices, not at what they say Strike gave them", () => {
+  const a = arena("battle");
+  const log: Log = {
+    players: [p("ann", now - 5000)],
+    moves: [
+      { at: now + 1000, who: "ann", what: "call", side: "long", power: 10, entry: 100, koAt: 0.0001, fee: 0, live: true },
+      { at: now + 2000, who: "ann", what: "bank", price: 101, value: 1_000_000, live: true },
+    ],
+  };
+  const quietBots = (g: Game): Game => ({ ...g, fighters: g.fighters.map((f) => (f.nerve ? { ...f, nerve: { ...f.nerve, nextAt: Infinity } } : f)) });
+  let g = quietBots(enter(a, "commando", 100, now, { me: "me", players: log.players }));
+  g = heed(g, { ...log, moves: log.moves.slice(0, 1) }, now + 1500);
+  const ann = () => g.fighters.find((f) => f.id === "ann")!;
+  near(ann().call!.koAt, opening("long", 10, 100, 10, now + 1000).koAt);
+  g = heed(g, log, now + 2500);
+  near(ann().cash, valueOf(opening("long", 10, 100, 10, now + 1000), 101));
+});
+
+test("at the bell everyone settles on the arena's price when it has one", () => {
+  const a = arena("skirmish");
+  let g = advance(enter(a, "commando", 100, a.startsAt - 1000), at(100), a.startsAt + 1000);
+  g = call(g, "long", 5, a.startsAt + 1000);
+  g = heed({ ...g, me: "me", seen: 0 }, { players: [], moves: [], bell: 102 }, a.endsAt - 10);
+  g = advance(g, at(101), a.endsAt);
+  assert.ok(g.over);
+  assert.equal(g.price, 102);
+  near(me(g).cash, valueOf(opening("long", 5, 100, 50, a.startsAt + 1000), 102));
+});
+
+test("a full game runs again side by side: the same market and times under an id of its own", () => {
+  const symbols = ["BTC-USD", "ETH-USD"];
+  const a = arenaAt("battle", now, symbols);
+  const two = shardOf(a, 2, symbols);
+  assert.equal(two.id, `${a.id}-2`);
+  assert.deepEqual({ ...two, id: a.id, shard: undefined }, { ...a, shard: undefined });
+  assert.deepEqual(arenaOf(two.id, symbols), two);
+  assert.equal(arenaOf(`${a.id}-0`, symbols), null);
+  assert.equal(arenaOf(`${a.id}-${SHARDS}`, symbols), null);
+  assert.equal(arenaOf("constructor-1", symbols), null);
+  assert.equal(arenaOf("toString-1", symbols), null);
+  assert.ok(sameGame(two.id, a.id));
+  assert.notDeepEqual(
+    lineup(two).map((b) => b.fighter.id),
+    lineup(a).map((b) => b.fighter.id),
+  );
 });
 
 test("another player's call, bank and K.O. land as they made them, and their own moves aren't taken twice", () => {

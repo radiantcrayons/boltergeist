@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { caught, close, filledOf, hit, lay, lift, open, plant } from "../live/desk";
 import { strike } from "../live/exchange";
 import { BUILDER, type Session } from "../live/session";
-import { Full, join, look, tell } from "../online";
+import { Full, gather, join, look, tell } from "../online";
 import { PREFIX } from "../store";
 import { klines, type Mark } from "../strike";
 import type { Market } from "../types";
 import {
   advance,
   arenaAt,
+  arenaOf,
   bank as bankIn,
   call as callIn,
   canCall,
@@ -20,6 +21,7 @@ import {
   plantFlag,
   pullTrap,
   rulesFor,
+  sameGame,
   setTrap,
   settle,
   STRIKE,
@@ -29,6 +31,7 @@ import {
   YOU,
   type Game,
   type Kind,
+  type Log,
   type Move,
   type Role,
   type Side,
@@ -55,6 +58,17 @@ function save(games: Game[]) {
 
 const yours = (g: Game | undefined) => g?.fighters.find((f) => f.id === YOU);
 const FEE_RATE = STRIKE.taker + BUILDER.feeBps / 10_000;
+// How long a game played online waits past the bell for the arena's price to end on, before ending on its own.
+const BELL_WAIT = 8000;
+// Saving the games is put off to now and then, but never past a change in what's on Strike.
+const SAVE_MS = 5000;
+const onStrike = (games: Game[]) =>
+  games
+    .map((g) => {
+      const me = yours(g);
+      return `${g.id}:${g.over ? 1 : 0}:${me?.call?.live ?? ""}:${me?.call?.flagOrder ?? ""}:${me?.trap?.live ?? ""}`;
+    })
+    .join("|");
 
 export type War = {
   games: Game[];
@@ -75,11 +89,34 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   const [busy, setBusy] = useState<string | null>(null);
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  useEffect(() => save(games), [games]);
   const latest = useRef({ marks, markets, games });
   useEffect(() => {
     latest.current = { marks, markets, games };
   }, [marks, markets, games]);
+  const kept = useRef({ strike: "", dirty: false });
+  useEffect(() => {
+    const strikeNow = onStrike(games);
+    if (strikeNow === kept.current.strike) return void (kept.current.dirty = true);
+    save(games);
+    kept.current = { strike: strikeNow, dirty: false };
+  }, [games]);
+  useEffect(() => {
+    const flush = () => {
+      if (!kept.current.dirty) return;
+      save(latest.current.games);
+      kept.current.dirty = false;
+    };
+    const hidden = () => document.visibilityState === "hidden" && flush();
+    const timer = setInterval(flush, SAVE_MS);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", hidden);
+      flush();
+    };
+  }, []);
   const update = useCallback((id: string, f: (g: Game) => Game) => setGames((gs) => gs.map((g) => (g.id === id ? f(g) : g))), []);
   const ex = useMemo(() => (session ? strike(session.keys, BUILDER.feeBps) : null), [session]);
 
@@ -91,6 +128,9 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   const flags = useRef(new Map<string, string>());
   const acting = useRef(new Set<string>());
 
+  // What each game played online has heard from the arena so far, in the order it came in.
+  const logs = useRef(new Map<string, Log>());
+
   // A game that's been away from the price, closed or walked into late, is caught up from Strike's candles.
   const syncing = useRef(new Set<string>());
   const sync = useCallback(
@@ -99,7 +139,10 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
       const minutes = Date.now() - g.at < 400 * 60_000;
       Promise.all([klines(g.symbol, minutes ? "1m" : "15m"), g.me ? look(g.id) : null])
         .then(
-          ([candles, log]) => update(g.id, (x) => catchUp(x, candles, minutes ? 60_000 : 900_000, Date.now(), log ?? undefined)),
+          ([candles, log]) => {
+            if (log) logs.current.set(g.id, log);
+            update(g.id, (x) => catchUp(x, candles, minutes ? 60_000 : 900_000, Date.now(), log ?? undefined));
+          },
           () => {},
         )
         .finally(() => syncing.current.delete(g.id));
@@ -117,21 +160,29 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     }
   }, [sync]);
 
+  // Games move on by Strike's marks, at the time Strike gives each one, so every browser sees the bots act at the same
+  // prices. The clock alone only walks a game up to its start, and over the bell. A game played online waits a moment
+  // at the bell for the arena's price, so everyone in it ends on the same one.
   const moveOn = useCallback(
-    (all: Record<string, Mark>) =>
+    (all: Record<string, Mark>, ticking: boolean) =>
       setGames((gs) =>
         gs.some((g) => !g.over && all[g.symbol])
           ? gs.map((g) => {
               const m = all[g.symbol];
-              return g.over || !m || syncing.current.has(g.id) ? g : advance(g, { h: m.p, l: m.p, c: m.p }, Date.now());
+              if (g.over || !m || syncing.current.has(g.id)) return g;
+              const now = Date.now();
+              const bar = { h: m.p, l: m.p, c: m.p };
+              let at = ticking ? (now < g.startsAt ? now : now >= g.endsAt ? now : g.at) : Math.max(m.at, Math.min(now, g.startsAt - 1));
+              if (at >= g.endsAt && g.me && g.bell === undefined && now < g.endsAt + BELL_WAIT) at = Math.max(g.at, g.endsAt - 1);
+              return at > g.at ? advance(g, bar, at) : g;
             })
           : gs,
       ),
     [],
   );
-  useEffect(() => moveOn(marks), [marks, moveOn]);
+  useEffect(() => moveOn(marks, false), [marks, moveOn]);
   useEffect(() => {
-    const timer = setInterval(() => moveOn(latest.current.marks), 1000);
+    const timer = setInterval(() => moveOn(latest.current.marks, true), 1000);
     return () => clearInterval(timer);
   }, [moveOn]);
 
@@ -144,8 +195,13 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
       for (const g of latest.current.games) {
         if (!g.me || g.over || syncing.current.has(g.id) || looking.current.has(g.id)) continue;
         looking.current.add(g.id);
-        look(g.id)
-          .then((log) => log && update(g.id, (x) => (syncing.current.has(x.id) ? x : heed(x, log, Date.now()))))
+        look(g.id, logs.current.get(g.id)?.next)
+          .then((got) => {
+            if (!got) return;
+            const log = gather(logs.current.get(g.id), got);
+            logs.current.set(g.id, log);
+            update(g.id, (x) => (syncing.current.has(x.id) ? x : heed(x, log, Date.now())));
+          })
           .finally(() => looking.current.delete(g.id));
       }
     }, 1500);
@@ -153,7 +209,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   }, [update]);
 
   const announce = useCallback((g: Game, m: Omit<Move, "at" | "who">) => {
-    if (g.me) tell(g.id, m).catch((err: Error) => setError(`The game missed that: ${err.message}`));
+    if (g.me) tell(g.id, g.me, m).catch((err: Error) => setError(`The game missed that: ${err.message}`));
   }, []);
 
   // Your traps springing and flags banking happen here by the price: the arena hears of them too.
@@ -326,13 +382,17 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   // With the arena out of reach, the fight goes on with bots in every other seat.
   const enter = useCallback(
     async (kind: Kind, role: Role, live = false) => {
-      const arena = arenaAt(kind, Date.now(), latest.current.markets.map((m) => m.symbol));
-      if (latest.current.games.some((g) => g.id === arena.id)) return arena.id;
-      if (!latest.current.marks[arena.symbol]) return null;
+      const symbols = latest.current.markets.map((m) => m.symbol);
+      const first = arenaAt(kind, Date.now(), symbols);
+      const there = latest.current.games.find((g) => sameGame(g.id, first.id));
+      if (there) return there.id;
+      if (!latest.current.marks[first.symbol]) return null;
       setJoining(true);
       setError(null);
       try {
-        const seat = await join(arena.id, role, live);
+        const seat = await join(first.id, role, live, live ? session?.keys : undefined);
+        const arena = (seat && arenaOf(seat.arena, symbols)) || first;
+        if (seat) logs.current.set(arena.id, seat.log);
         const now = Date.now();
         const rules = rulesFor(marketOf(arena.symbol)?.tiers ?? [], TOP_STAKE);
         const game = newGame(arena, role, latest.current.marks[arena.symbol].p, now, { live, rules, ...(seat && { me: seat.me, players: seat.log.players }) });
@@ -346,7 +406,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
         setJoining(false);
       }
     },
-    [sync],
+    [sync, session],
   );
 
   // One thing at a time on Strike per game, with the watch standing back while it's on its way.

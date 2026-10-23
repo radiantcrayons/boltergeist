@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import * as fmt from "@/lib/format";
-import { arenaAt, gain, KINDS, lineup, placeOf, ROLES, SEATS, worth, YOU, type Arena, type Game, type Kind, type Player, type Role } from "@/lib/game/war";
+import { arenaAt, gain, KINDS, lineup, placeOf, ROLES, sameGame, SEATS, worth, YOU, type Arena, type Game, type Kind, type Player, type Role } from "@/lib/game/war";
 import { lobbies, me, NAME, rename } from "@/lib/online";
 import { play } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
@@ -74,7 +74,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
     return sum + worth(me, g.price) - me.stake;
   }, 0);
   const market = markets.find((m) => m.symbol === arena.symbol);
-  const joined = games.find((g) => g.id === arena.id);
+  const joined = games.find((g) => sameGame(g.id, arena.id));
   const stake = ROLES[role].stake;
   const short = !joined && live && available !== null && available < stake;
   const ready = !!joined || (!!marks[arena.symbol] && !short);
@@ -108,7 +108,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
             const m = markets.find((x) => x.symbol === a.symbol);
             const t = tickers[a.symbol];
             const change = t && t.open ? t.last / t.open - 1 : null;
-            const yours = games.some((g) => g.id === a.id);
+            const yours = games.some((g) => sameGame(g.id, a.id));
             const people = Math.max(crowd[a.id]?.length ?? 0, yours ? 1 : 0);
             const others = people - (yours ? 1 : 0);
             const seated = Math.min(SEATS, people + Math.min(lineup(a).filter((b) => b.joinsAt <= now).length, Math.max(0, SEATS - people)));

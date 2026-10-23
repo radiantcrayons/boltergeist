@@ -114,8 +114,11 @@ export type Move = {
   value?: number;
   flag?: number;
   live?: boolean;
+  // The arena's own name for a move, to tell one already seen from a new one.
+  id?: string;
 };
-export type Log = { players: Player[]; moves: Move[] };
+// `bell` is the price the game ended at, as the arena took it; `next` is where the next look picks up from.
+export type Log = { players: Player[]; moves: Move[]; bell?: number; next?: string };
 
 export type Event = {
   at: number;
@@ -134,7 +137,7 @@ export type Event = {
   maker?: boolean;
 };
 
-export type Arena = { id: string; kind: Kind; symbol: string; opensAt: number; startsAt: number; endsAt: number };
+export type Arena = { id: string; kind: Kind; symbol: string; opensAt: number; startsAt: number; endsAt: number; shard?: number };
 
 export type Game = {
   id: string;
@@ -152,12 +155,15 @@ export type Game = {
   // Playing online: who you are in the arena, and how many of its moves are in.
   me?: string;
   seen?: number;
+  bell?: number;
 };
 
 export const YOU = "you";
 // How long after the start the seats stay open, for players on their way in.
 export const GRACE = 2000;
 export const SEATS = 10;
+// How many games of a kind can run side by side when the first fills up.
+export const SHARDS = 20;
 const RIVALS = SEATS - 1;
 const FEED = 40;
 
@@ -217,12 +223,17 @@ const seeded = (seed: number) => {
   return Object.assign(random, { seed: () => s });
 };
 
-const arenaFrom = (kind: Kind, startsAt: number, symbols: string[]): Arena => {
+const arenaFrom = (kind: Kind, startsAt: number, symbols: string[], shard = 0): Arena => {
   const { every, doors, ms } = KINDS[kind];
   const pool = ROTATION[kind].filter((s) => symbols.includes(s));
   const all = pool.length ? pool : [...symbols].sort();
-  return { id: `${kind}-${(startsAt / 60_000).toString(36)}`, kind, symbol: all[(startsAt / every) % all.length] ?? "BTC-USD", opensAt: startsAt - every + doors, startsAt, endsAt: startsAt + ms };
+  const id = `${kind}-${(startsAt / 60_000).toString(36)}${shard ? `-${shard}` : ""}`;
+  return { id, kind, symbol: all[(startsAt / every) % all.length] ?? "BTC-USD", opensAt: startsAt - every + doors, startsAt, endsAt: startsAt + ms, ...(shard && { shard }) };
 };
+
+// The same game run again side by side, for players who find the first one full.
+export const shardOf = (a: Arena, shard: number, symbols: string[]): Arena => arenaFrom(a.kind, a.startsAt, symbols, shard);
+export const sameGame = (x: string, y: string) => x.split("-").slice(0, 2).join("-") === y.split("-").slice(0, 2).join("-");
 
 // The one arena of a kind to join: the running one while its doors are open, then the next. On the market whose turn it is.
 export function arenaAt(kind: Kind, now: number, symbols: string[]): Arena {
@@ -232,10 +243,12 @@ export function arenaAt(kind: Kind, now: number, symbols: string[]): Arena {
 }
 
 export function arenaOf(id: string, symbols: string[]): Arena | null {
-  const [kind, at] = id.split("-");
-  if (!(kind in KINDS) || !/^[0-9a-z]{1,10}$/.test(at ?? "")) return null;
+  const [kind, at, shard, ...rest] = id.split("-");
+  if (rest.length || !Object.hasOwn(KINDS, kind) || !/^[0-9a-z]{1,10}$/.test(at ?? "")) return null;
+  const n = shard === undefined ? 0 : /^[1-9][0-9]?$/.test(shard) ? Number(shard) : -1;
+  if (n < 0 || n >= SHARDS) return null;
   const startsAt = parseInt(at, 36) * 60_000;
-  return startsAt % KINDS[kind as Kind].every === 0 ? arenaFrom(kind as Kind, startsAt, symbols) : null;
+  return startsAt % KINDS[kind as Kind].every === 0 ? arenaFrom(kind as Kind, startsAt, symbols, n) : null;
 }
 
 export const doorsOpen = (a: Arena, now: number) => now >= a.opensAt && now < a.startsAt + KINDS[a.kind].doors;
@@ -318,14 +331,16 @@ const critAt = (c: Call, price: number, made: number) => {
   return made > c.stake * 0.1 && move > 0 && dir(c.side) * (price - c.entry) >= move * 0.85;
 };
 
-// Bots fill the seats the players who came in before the start leave empty, each as their time comes.
+// Bots fill the seats players leave empty, each as their time comes. A player in after the start takes the seat of the last bot in.
 function bots(a: Pick<Arena, "id" | "kind" | "startsAt">, people: Fighter[], t: number): Fighter[] {
-  const room = SEATS - people.filter((f) => (f.joinedAt ?? 0) < a.startsAt).length;
+  const room = SEATS - people.length;
   return lineup(a)
     .filter((b) => b.joinsAt <= Math.min(t, a.startsAt))
     .slice(0, Math.max(0, room))
     .map((b) => b.fighter);
 }
+
+const known = (p: Player) => Object.hasOwn(ROLES, p.role);
 
 const newcomer = (p: Player, id = p.id, name = p.name): Fighter => {
   const stake = ROLES[p.role].stake;
@@ -335,7 +350,7 @@ const newcomer = (p: Player, id = p.id, name = p.name): Fighter => {
 // Walking in after the start, the game is set up as of the start for the rivals to be caught up from there.
 export function enter(arena: Arena, role: Role, price: number, now: number, opts: { live?: boolean; rules?: Rules; me?: string; players?: Player[] } = {}): Game {
   const self = newcomer({ id: YOU, name: "you", role, joinedAt: now, live: opts.live }, YOU, "you");
-  const people = [self, ...(opts.players ?? []).filter((p) => p.id !== opts.me && p.joinedAt <= now).map((p) => newcomer(p))];
+  const people = [self, ...(opts.players ?? []).filter((p) => p.id !== opts.me && p.joinedAt <= now && known(p)).map((p) => newcomer(p))];
   const seated = bots(arena, people, now);
   const joins: Event[] = [...people.slice(1), ...seated]
     .map((f) => ({ at: f.joinedAt ?? lineup(arena).find((b) => b.fighter.id === f.id)!.joinsAt, who: f.name, what: "join" as const, role: f.role }))
@@ -357,12 +372,16 @@ export function enter(arena: Arena, role: Role, price: number, now: number, opts
   };
 }
 
-// Until just after the start the bots shuffle to make room for players; then the seats are set.
+// Until just after the start the bots shuffle to make room for players; then the seats are set, and only a player coming in late moves a bot out.
 function seat(game: Game, fighters: Fighter[], t: number, events: Event[]): Fighter[] {
-  if (game.at >= game.startsAt + GRACE) return fighters;
   const people = fighters.filter((f) => !f.nerve);
   const had = new Map(fighters.filter((f) => f.nerve).map((f) => [f.id, f]));
   const due = bots(game, people, t);
+  if (game.at >= game.startsAt + GRACE) {
+    if (fighters.length <= SEATS) return fighters;
+    const kept = new Set(due.map((b) => b.id));
+    return fighters.filter((f) => !f.nerve || kept.has(f.id));
+  }
   for (const b of due) if (!had.has(b.id)) events.push({ at: lineup(game).find((x) => x.fighter.id === b.id)!.joinsAt, who: b.name, what: "join", role: b.role });
   if (due.length === had.size && due.every((b) => had.has(b.id))) return fighters;
   return [...people, ...due.map((b) => had.get(b.id) ?? b)];
@@ -373,10 +392,11 @@ export function heed(game: Game, log: Log, until: number): Game {
   if (!game.me) return game;
   const events: Event[] = [];
   const here = new Set(game.fighters.map((f) => f.id));
-  const fresh = log.players.filter((p) => p.id !== game.me && !here.has(p.id) && p.joinedAt <= until && p.joinedAt < game.endsAt);
+  const fresh = log.players.filter((p) => p.id !== game.me && !here.has(p.id) && p.joinedAt <= until && p.joinedAt < game.endsAt && known(p));
   for (const p of fresh) events.push({ at: p.joinedAt, who: p.name, what: "join", role: p.role });
   let g: Game = fresh.length ? { ...game, fighters: seat(game, [...game.fighters, ...fresh.map((p) => newcomer(p))], Math.max(game.at, until), events) } : game;
   if (events.length) g = { ...g, feed: [...events.sort((x, y) => y.at - x.at), ...g.feed].slice(0, FEED) };
+  if (log.bell && !g.bell) g = { ...g, bell: log.bell };
   let seen = g.seen ?? 0;
   while (seen < log.moves.length && log.moves[seen].at <= until) {
     const m = log.moves[seen++];
@@ -385,8 +405,9 @@ export function heed(game: Game, log: Log, until: number): Game {
   return seen === g.seen ? g : { ...g, seen };
 }
 
-// Another player's move, as they made it. Their traps and flags spring here by the price, as everyone's do;
-// the fills and banks they say they had only land if the price here hasn't sprung them already.
+// Another player's move, as the arena took it. Their traps and flags spring here by the price, as everyone's do;
+// the fills and banks they say they had only land if the price here hasn't sprung them already. A live call
+// lands at the arena's price like any other: what Strike says about it is only theirs to see.
 export function move(game: Game, m: Move): Game {
   const f = game.fighters.find((x) => x.id === m.who);
   if (!f || f.id === YOU || f.out || game.over || m.at > game.endsAt) return game;
@@ -407,8 +428,7 @@ export function move(game: Game, m: Move): Game {
   }
   if (m.what === "call") {
     if (f.call || !m.side || !m.power || !m.entry || m.at < game.startsAt) return game;
-    const opened = opening(m.side, m.power, m.entry, f.cash, m.at, rulesOf(game).tiers);
-    const c = m.live && m.koAt ? { ...opened, koAt: m.koAt, fee: m.fee ?? opened.fee } : opened;
+    const c = opening(m.side, m.power, m.entry, f.cash, m.at, rulesOf(game).tiers);
     return withFighter(game, { ...f, cash: 0, call: c, trap: null, fought: fights(game, f, m.at) }, { at: m.at, who: f.name, what: m.side, power: m.power });
   }
   if (!f.call) return game;
@@ -418,7 +438,7 @@ export function move(game: Game, m: Move): Game {
     const events: Event[] = [];
     return withFighter(game, flagged(game, f, m.flag, m.at, events), events[0]);
   }
-  const cash = m.live && m.value !== undefined ? m.value : valueOf(f.call, price);
+  const cash = valueOf(f.call, price);
   const made = cash - f.call.stake;
   const crit = critAt(f.call, price, made);
   return withFighter(game, { ...f, cash, call: null, crits: f.crits + (crit ? 1 : 0), fought: held(game, f, m.at) }, { at: m.at, who: f.name, what: "bank", side: f.call.side, stake: f.call.stake, made, crit });
@@ -574,10 +594,11 @@ export function advance(game: Game, bar: { h: number; l: number; c: number }, at
       return moved.fighter;
     });
   } else {
-    fighters = fighters.map((f) => (f.call ? { ...f, cash: valueOf(f.call, bar.c), call: null } : f.trap ? { ...f, trap: null } : f));
+    const last = game.bell ?? bar.c;
+    fighters = fighters.map((f) => (f.call ? { ...f, cash: valueOf(f.call, last), call: null } : f.trap ? { ...f, trap: null } : f));
     events.push({ at: t, who: "", what: "end" });
   }
-  return { ...game, fighters, price: bar.c, at: t, over: ending, feed: [...events.reverse(), ...game.feed].slice(0, FEED) };
+  return { ...game, fighters, price: ending && game.bell ? game.bell : bar.c, at: t, over: ending, feed: [...events.reverse(), ...game.feed].slice(0, FEED) };
 }
 
 function act(f: Fighter, game: Game, price: number, t: number): { fighter: Fighter; event: Event | null } {
