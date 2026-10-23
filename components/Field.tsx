@@ -974,6 +974,8 @@ export function Field(props: Props) {
   const soaked = useRef<{ c: HTMLCanvasElement | null; n: number; level: number }>({ c: null, n: -1, level: -1 });
   const hover = useRef<Pt | null>(null);
   const soft = useRef<HTMLCanvasElement | null>(null);
+  const standing = useRef<HTMLCanvasElement | null>(null);
+  const writing = useRef<HTMLCanvasElement | null>(null);
   // A finger aims by dragging and places on lifting; the click a tap also fires is then passed over.
   const aiming = useRef(false);
   const tapped = useRef(false);
@@ -1093,7 +1095,31 @@ export function Field(props: Props) {
   function draw() {
     const c = canvas.current;
     if (!c || !view.current.w) return;
-    const ctx = c.getContext("2d")!;
+    let ctx = c.getContext("2d")!;
+    const field = ctx;
+    // A clear layer the size of the field, set to draw as the field does.
+    const layer = (ref: { current: HTMLCanvasElement | null }) => {
+      const l = (ref.current ??= document.createElement("canvas"));
+      if (l.width !== c.width || l.height !== c.height) {
+        l.width = c.width;
+        l.height = c.height;
+      }
+      const lc = l.getContext("2d")!;
+      lc.setTransform(1, 0, 0, 1, 0, 0);
+      lc.globalAlpha = 1;
+      lc.globalCompositeOperation = "source-over";
+      lc.clearRect(0, 0, l.width, l.height);
+      lc.setTransform(field.getTransform());
+      return lc;
+    };
+    const lay = (l: HTMLCanvasElement) => {
+      field.save();
+      field.setTransform(1, 0, 0, 1, 0, 0);
+      field.globalAlpha = 1;
+      field.globalCompositeOperation = "source-over";
+      field.drawImage(l, 0, 0);
+      field.restore();
+    };
     const { candles, intervalMs, mark, tickSize, reach, span, rounds, yours, role, walls = [], blasts = [], marks, pins = [], pick, coin } = latest.current;
     const kind = GHOST_KIND[role];
     // On the field the stakes' sizes are closer together than in the portraits, so even a wisp stands out.
@@ -1409,13 +1435,13 @@ export function Field(props: Props) {
     // The future is haze: nobody knows where they'll walk.
     poly(ctx, [S(0.5, ext.y0), S(ext.x1 + 1, ext.y0), S(ext.x1 + 1, ext.y1), S(0.5, ext.y1)], css(CLAY.haze, 0.22));
 
-    // Your thundercloud: it keeps pace a little ahead of the kids over your line and strikes the line again and again, each strike
+    // Your thundercloud: it keeps pace with the kids over your line and strikes the line again and again, each strike
     // leaving a scorch that the field carries off behind them, so the price it waits for is marked out on the ground.
     const STRIKE_MS = 1300;
     const yf = yours.flag && onMap(yOf(yours.flag.price)) ? yOf(yours.flag.price) : null;
-    // Where a thundercloud over a row floats: a little ahead of the kids, further ahead the further south it is so it never hides them.
-    const cloudAt = (y: number) => clamp(3.1 + Math.max(0, y - y0), 3.1, 6.5);
-    const cloudX = yf === null ? 0 : cloudAt(yf);
+    // A thundercloud floats over its row in line with the kids, a step behind the price line.
+    const CLOUD_OFF = -KIDS_BACK;
+    const cloudX = CLOUD_OFF;
     const CLOUD_Z = 2.7 * A;
     const drawCloud = (x: number, y: number, alpha: number) => {
       const f = stormAt(Math.round(((A * 4.4) / 26) * dpr * 10) / 10);
@@ -1471,7 +1497,7 @@ export function Field(props: Props) {
       const kx = X(p.at);
       const ky = yOf(p.price);
       const q = S(kx, ky);
-      const cx = kx + cloudAt(ky);
+      const cx = kx + CLOUD_OFF;
       fading.push({ x: cx, y: ky, alpha: 1 - t });
       if (t < 0.4 && !reduced()) {
         glare.push({ x: kx, y: ky });
@@ -1599,17 +1625,17 @@ export function Field(props: Props) {
         glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, rgb: side === "long" ? "170, 240, 210" : "250, 190, 205", a: 0.32 });
       });
     };
-    // A row of your ghosts on a line just ahead of the kids, keeping pace with them: as many as your power calls for, as big as your
-    // stake, spaced by their size and, when there are many, staggered either side of the line so the row stays short.
+    // A row of your ghosts on your line, keeping pace with the kids and centred on them: as many as your power calls for, as big as
+    // your stake, spaced by their size and, when there are many, staggered either side of the line so the row stays short.
     const across = ({ wisp: 19, spectre: 20, poltergeist: 24 }[kind] * 1.9 * scale) / 26;
     const gapOf = (count: number) => Math.min(across * 0.8, 9 / Math.max(1, count - 1));
     const row = (count: number) => {
       const gap = gapOf(count);
       const tight = gap < across * 0.7;
-      return Array.from({ length: count }, (_, j) => ({ x: 0.75 + across * 0.5 + j * gap, dy: tight ? (j % 2 ? 0.32 : -0.32) : 0 }));
+      return Array.from({ length: count }, (_, j) => ({ x: -KIDS_BACK + (j - (count - 1) / 2) * gap, dy: tight ? (j % 2 ? 0.32 : -0.32) : 0 }));
     };
 
-    // Your graves: a line of them on your line just ahead of the kids, set in the ground itself, so as the field moves on the one at
+    // Your graves: a line of them on your line, centred on the kids, set in the ground itself, so as the field moves on the one at
     // the back sinks into the earth and a new one rises at the front. They sink away as your ghosts swirl up out of them.
     const graveRow = (ya: number, count: number, side: Side, sink: number) => {
       const xs = row(count);
@@ -1813,9 +1839,13 @@ export function Field(props: Props) {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.restore();
+    // Everything standing goes down on a layer of its own, so the words on the ground can be cut away wherever something stands.
+    ctx = layer(standing);
     stood.sort((a, b) => a.d - b.d).forEach((s) => s.draw());
     if (yf !== null) drawCloud(cloudX, yf, 1);
     for (const f of fading) drawCloud(f.x, f.y, f.alpha);
+    ctx = field;
+    lay(standing.current!);
 
     // Further into the future the haze thickens until the land is lost in it, and the far ground fades into the sky along the top.
     const fogFrom = S(F, 0);
@@ -1999,6 +2029,10 @@ export function Field(props: Props) {
       ctx.restore();
     }
 
+    // The words on the ground go down last so the dusk and rain don't dull them, but trees, kids, ghosts, hands and clouds still stand
+    // in front of them.
+    ctx = layer(writing);
+
     // The day's markers, laid along their lines of time: the haunt's start, each new round and its floor, the final bell.
     for (const [t, label, color] of [
       [span.from, "HAUNTING BEGINS", COLORS.volt],
@@ -2030,15 +2064,15 @@ export function Field(props: Props) {
     }
 
     // The prices, marked on the ground like the numbers on a pitch: each one every few tiles along its row, set in the ground so they
-    // move off with it as time passes, brightest just ahead of the kids and fading away behind them into the past.
+    // move off with it as time passes, at half strength where they come in from the east, a tenth by the price line, then gone.
     const stepP = niceStep(g.rowSize * Math.max(4, 100 / A));
-    const STRIDE = 8;
+    const STRIDE = 12;
     for (let p = Math.ceil(priceAt(ext.y1) / stepP) * stepP; p < priceAt(ext.y0); p += stepP) {
       const y = yOf(p);
       const text = fmt.price(p, Math.max(tickSize, stepP / 100));
       for (let i = Math.floor((nowX + ext.x0) / STRIDE); i * STRIDE - nowX < ext.x1; i++) {
         const x = i * STRIDE - nowX;
-        const a = clamp(1 + x / 7, 0, 1) * clamp(1 - (x - 4) / 8, 0, 1) * 0.55;
+        const a = x >= 0 ? 0.1 + 0.4 * clamp(x / Math.max(ext.x1, 1), 0, 1) : 0.1 * clamp(1 + x / 2, 0, 1);
         if (a < 0.04 || Math.hypot(x, y - y0) < 2.4) continue;
         if (yf !== null && Math.abs(S(x, y).y - S(cloudX, yf, CLOUD_Z).y) < 1.6 * A && Math.abs(S(x, y).x - S(cloudX, yf).x) < 2.4 * A) continue;
         marking(text, x, y - 0.1, 0.4, `rgba(214, 224, 255, ${a})`, { align: "center", glow: true });
@@ -2083,12 +2117,21 @@ export function Field(props: Props) {
     }
 
     const hovered = hover.current ? priceUnder(hover.current.x, hover.current.y) : null;
+    ctx = field;
+    const words = writing.current!.getContext("2d")!;
+    words.save();
+    words.setTransform(1, 0, 0, 1, 0, 0);
+    words.globalCompositeOperation = "destination-out";
+    words.drawImage(standing.current!, 0, 0);
+    words.restore();
+    lay(writing.current!);
+
     const picked = hovered !== null && pick ? pick(hovered) : null;
     // What a click here would put on the field, shown faintly where it would go.
     if (picked) {
       const p = picked.p;
       const y = yOf(p);
-      if (picked.art === "cloud") drawCloud(cloudAt(y), y, 0.5);
+      if (picked.art === "cloud") drawCloud(CLOUD_OFF, y, 0.5);
       else if (picked.art) for (const [j, at0] of row(picked.art.count).entries()) blit(ctx, graveSprite(A, picked.art.side, j, scale * 1.5), S(at0.x, y + at0.dy * 0.8), 0.5);
       const box = wrap.current!.getBoundingClientRect();
       const hx = hover.current!.x - box.left;
