@@ -21,11 +21,14 @@ export type Session = {
 export type Balance = { wallet: number; available: number };
 
 const KEY = `tradewars.session.${NETWORK}`;
+// A pasted API key never expires on Strike, so this browser forgets it after a while.
+const KEY_TTL = 12 * 60 * 60 * 1000;
 
 export function loadSession(): Session | null {
   try {
     const kept = JSON.parse(localStorage.getItem(KEY) ?? "null") as Session | null;
     if (!kept?.keys?.secret || kept.network !== NETWORK) return null;
+    if (kept.via === "key" && !kept.expiresAt) return null;
     if (kept.expiresAt && kept.expiresAt < Date.now()) return null;
     return kept;
   } catch {
@@ -75,7 +78,14 @@ export async function viaKey(secretHex: string): Promise<Session> {
   const account = await signed<{ account_id: string; blockchain_address?: string | null; blockchain?: string }>(keys, "GET", "/v2/account").catch((err) => {
     throw err instanceof StrikeError && err.status === 401 ? new Error(`Strike doesn't know that key on ${NETWORK}: register its public key on Strike's API wallets page`) : err;
   });
-  return { network: NETWORK, keys, accountId: account.account_id, via: "key", address: account.blockchain_address ?? undefined };
+  return {
+    network: NETWORK,
+    keys,
+    accountId: account.account_id,
+    via: "key",
+    address: account.blockchain_address ?? undefined,
+    expiresAt: Date.now() + KEY_TTL,
+  };
 }
 
 export async function balance(keys: Keys): Promise<Balance> {

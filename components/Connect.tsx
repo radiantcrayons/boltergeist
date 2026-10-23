@@ -15,6 +15,10 @@ type Props = {
 
 const CHAINS = { ethereum: "Ethereum", solana: "Solana", cardano: "Cardano" } as const;
 
+// Wallets name their own icon; only an inline image is drawn, and nothing that could close the url().
+const iconStyle = (icon?: string) =>
+  icon && /^data:image\/[\w.+-]+[;,]/.test(icon) ? { backgroundImage: `url("${icon.replace(/["\\\r\n]/g, encodeURIComponent)}")` } : undefined;
+
 export function Connect({ session, balance, onSession, onClose }: Props) {
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -90,7 +94,7 @@ export function Connect({ session, balance, onSession, onClose }: Props) {
                 {wallets.length ? (
                   wallets.map((w) => (
                     <button key={w.id} className="wallet" disabled={!!busy} onClick={() => run(w.id, () => viaWallet(w))}>
-                      <span className="icon" style={w.icon ? { backgroundImage: `url("${w.icon}")` } : undefined} />
+                      <span className="icon" style={iconStyle(w.icon)} />
                       <span className="name">{w.name}</span>
                       <span className="chain">{CHAINS[w.chain]}</span>
                       {busy === w.id && <span className="dim">check your wallet...</span>}
