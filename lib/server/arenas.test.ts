@@ -17,6 +17,9 @@ process.env.ARENAS_TABLE = "boltergeist-test";
 let MARK = 100_000;
 const TEST_MARK = 81_500;
 let LOW: number | undefined;
+// The minute's candle, when a test sets it, and the most leverage Strike's markets allow.
+let CANDLE: { t: number; low: number } | undefined;
+let MAX_LEVERAGE: number | undefined;
 let markAsks = 0;
 const ACCOUNTS: Record<string, string> = {};
 const SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"];
@@ -27,7 +30,12 @@ globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
     markAsks++;
     return Response.json({ p: String(u.includes("testnet") ? TEST_MARK : MARK) });
   }
-  if (u.includes("klines")) return Response.json(LOW === undefined ? [] : [[clock - 500, String(MARK), String(MARK), String(LOW), String(MARK)]]);
+  if (u.includes("klines")) {
+    if (CANDLE) return Response.json([[CANDLE.t, String(MARK), String(MARK), String(CANDLE.low), String(MARK)]]);
+    return Response.json(LOW === undefined ? [] : [[clock - 500, String(MARK), String(MARK), String(LOW), String(MARK)]]);
+  }
+  if (u.endsWith("/v2/markets") && MAX_LEVERAGE)
+    return Response.json({ markets: Object.fromEntries(SYMBOLS.map((s) => [s, { margin_tiers: [{ max_notional: "1000000000", max_leverage: MAX_LEVERAGE, maintenance_margin_rate: "0.005", maintenance_amount: "0" }] }])) });
   if (u.endsWith("/v2/account")) {
     const key = (init?.headers as Record<string, string>)["X-API-Wallet-Public-Key"];
     return ACCOUNTS[key] ? Response.json({ account_id: ACCOUNTS[key] }) : new Response(null, { status: 401 });
@@ -292,4 +300,51 @@ test("each Strike network keeps its own players and prices under the same game, 
   clock += 2000;
   const move = await store.act(t, { secret: tester, what: "call", side: "long", power: 10 });
   assert.equal(move.entry, TEST_MARK);
+});
+
+test("a touch of the graves within the minute they went down fills them, but a low from before they went down doesn't", async () => {
+  const a = await battle();
+  const me = secret();
+  const early = secret();
+  await store.join(a, { secret: me, name: "Quick Wick", role: "commando" });
+  await store.join(a, { secret: early, name: "Back Dater", role: "commando" });
+  clock += 1000;
+  const minute = Math.floor(clock / 60_000) * 60_000;
+  CANDLE = { t: minute, low: MARK };
+  await store.act(a, { secret: me, what: "trap", side: "long", power: 10, price: MARK * 0.9995 });
+  CANDLE = { t: minute, low: MARK * 0.99 };
+  await store.act(a, { secret: early, what: "trap", side: "long", power: 10, price: MARK * 0.995 });
+  clock += 5000;
+  await assert.rejects(store.act(a, { secret: early, what: "fill" }), /hasn't reached/);
+  const fill = await store.act(a, { secret: me, what: "fill" });
+  assert.equal(fill.price, MARK * 0.9995);
+  CANDLE = undefined;
+});
+
+test("power is held to what the market allows", async () => {
+  MAX_LEVERAGE = 20;
+  const a = await battle();
+  const me = secret();
+  await store.join(a, { secret: me, name: "Greedy Ghost", role: "warlord" });
+  clock += 1000;
+  await assert.rejects(store.act(a, { secret: me, what: "call", side: "long", power: 25 }), /20x/);
+  assert.equal((await store.act(a, { secret: me, what: "call", side: "long", power: 20 })).power, 20);
+  MAX_LEVERAGE = undefined;
+});
+
+test("one browser holds one seat in a game, on paper or signed in, whichever it took first", async () => {
+  const a = await battle();
+  ACCOUNTS["d".repeat(64)] = "acct-11";
+  ACCOUNTS["e".repeat(64)] = "acct-12";
+  const paperFirst = secret();
+  const onPaper = await store.join(a, { secret: paperFirst, name: "Paper Ghost", role: "soldier" });
+  const signedIn = await store.join(a, { secret: paperFirst, name: "Paper Ghost", role: "soldier", proof: proof("d".repeat(64)) });
+  assert.equal(signedIn.player.id, onPaper.player.id);
+  const liveFirst = secret();
+  const live = await store.join(a, { secret: liveFirst, name: "Live Ghost", role: "warlord", proof: proof("e".repeat(64)) });
+  const paper = await store.join(a, { secret: liveFirst, name: "Live Ghost", role: "warlord" });
+  assert.equal(paper.player.id, live.player.id);
+  clock += 1000;
+  await store.act(a, { secret: liveFirst, seat: paper.player.id, what: "call", side: "long", power: 5 });
+  assert.equal((await store.log(a, { fresh: true })).players.length, 2);
 });

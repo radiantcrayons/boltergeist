@@ -3,10 +3,13 @@ import { test } from "node:test";
 import { CAP, rule, type Prices, type State } from "./moves.ts";
 
 const MARK = 100;
-// Strike's price, and the lows and highs it's seen, as the game would ask for them.
-const prices = (mark = MARK, seen: { low?: number; high?: number } = {}): Prices => ({
+// Strike's price, the lows and highs it's seen since, its price step and the most power the market allows, as the game would ask.
+const prices = (mark = MARK, seen: { low?: number; high?: number } = {}, most = 100): Prices => ({
   mark: async () => mark,
-  reached: async (way, price) => (way === "down" ? Math.min(mark, seen.low ?? mark) <= price * 1.0005 : Math.max(mark, seen.high ?? mark) >= price * 0.9995),
+  tick: async () => 0.01,
+  most: async () => most,
+  edge: async () => undefined,
+  reached: async (way, price) => (way === "down" ? Math.min(mark, seen.low ?? mark) <= price : Math.max(mark, seen.high ?? mark) >= price),
 });
 const fresh: State = { n: 0, lastAt: 0 };
 const go = (was: State, body: Record<string, unknown>, p = prices(), now = 1000) => rule("battle", was, body, now, p);
@@ -77,4 +80,23 @@ test("pulls need graves, a K.O. puts a player out for good, and every move count
   await assert.rejects(go(out, { what: "call", side: "long", power: 10 }), /out of this game/);
   await assert.rejects(go({ n: CAP.battle, lastAt: 0 }, { what: "call", side: "long", power: 10 }), /all the moves/);
   await assert.rejects(go(fresh, { what: "dance" }), /Call, graves/);
+});
+
+test("graves and thunderclouds go a tick or more past the price, and only fill or strike once the price really gets there", async () => {
+  // At a price that never moves, a hair either side of it earns nothing.
+  await assert.rejects(go(fresh, { what: "trap", side: "long", power: 100, price: 99.995 }), /below the price/);
+  await assert.rejects(go(fresh, { what: "trap", side: "short", power: 100, price: 100.005 }), /above the price/);
+  const trap = await go(fresh, { what: "trap", side: "long", power: 100, price: 99.9501 });
+  await assert.rejects(go(trap.state, { what: "fill", price: 99.9501 }), /hasn't reached/);
+  const called = (await go(fresh, { what: "call", side: "long", power: 100 })).state;
+  await assert.rejects(go(called, { what: "flag", price: 100.005 }), /past the price/);
+  const clouded = (await go(called, { what: "flag", price: 100.0499 })).state;
+  const out = await go(clouded, { what: "bank", flag: 100.0499 });
+  assert.deepEqual(out.move, { what: "bank", price: MARK });
+});
+
+test("power stays within what the market allows", async () => {
+  await assert.rejects(go(fresh, { what: "call", side: "long", power: 50 }, prices(MARK, {}, 25)), /25x/);
+  await assert.rejects(go(fresh, { what: "trap", side: "long", power: 26, price: 99 }, prices(MARK, {}, 25)), /25x/);
+  assert.equal((await go(fresh, { what: "call", side: "long", power: 25 }, prices(MARK, {}, 25))).move.power, 25);
 });

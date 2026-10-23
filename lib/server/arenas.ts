@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
-import { arenaOf, doorsOpen, ROLES, ROSTER, SEATS, SHARDS, shardOf, type Arena, type Log, type Move, type Player, type Role } from "../game/war.ts";
+import { arenaOf, doorsOpen, POWER, ROLES, ROSTER, rulesFor, SEATS, SHARDS, shardOf, TOP_STAKE, type Arena, type Log, type Move, type Player, type Role, type Tier } from "../game/war.ts";
 import { BUILT, restOf, type Network } from "../strike.ts";
-import { Refused, rule, TOL, type Prices, type State } from "./moves.ts";
+import { Refused, rule, type Edge, type Prices, type State } from "./moves.ts";
 
 export { Refused };
 
@@ -43,27 +43,55 @@ const LAG = 5000;
 // The bell is only taken by a look within this of the end, so a late look can't set it from a price long after.
 const BELL_WINDOW = 60_000;
 
-const markets = new Map<Network, { at: number; symbols: string[] }>();
-async function symbols(net: Network): Promise<string[]> {
+// Every ask of Strike gives up after a few seconds, so a move never hangs on it.
+const ask = (url: string, init: RequestInit = {}) => fetch(url, { cache: "no-store", ...init, signal: AbortSignal.timeout(4000) });
+
+type Info = { at: number; symbols: string[]; ticks: Map<string, number> };
+const markets = new Map<Network, Info>();
+async function info(net: Network): Promise<Info> {
   const kept = markets.get(net);
-  if (kept && Date.now() - kept.at < 600_000) return kept.symbols;
-  const res = await fetch(`${restOf(net)}/price/v2/exchangeInfo`, { cache: "no-store" });
-  if (!res.ok) throw new Refused("Can't reach Strike", 502);
-  const info = (await res.json()) as { symbols: { symbol: string; status: string }[] };
-  const now = { at: Date.now(), symbols: info.symbols.filter((s) => s.status === "trading").map((s) => s.symbol) };
+  if (kept && Date.now() - kept.at < 600_000) return kept;
+  const res = await ask(`${restOf(net)}/price/v2/exchangeInfo`).catch(() => null);
+  if (!res?.ok) throw new Refused("Can't reach Strike", 502);
+  const got = (await res.json()) as { symbols: { symbol: string; status: string; filters?: { filterType: string; tickSize?: string }[] }[] };
+  const trading = got.symbols.filter((s) => s.status === "trading");
+  const ticks = new Map(trading.map((s) => [s.symbol, Number(s.filters?.find((f) => f.filterType === "PRICE_FILTER")?.tickSize) || 0]));
+  const now = { at: Date.now(), symbols: trading.map((s) => s.symbol), ticks };
   markets.set(net, now);
-  return now.symbols;
+  return now;
+}
+const symbols = async (net: Network) => (await info(net)).symbols;
+
+// The most power each market lets the game's stakes carry, from Strike's margin tiers, as the players' own screens work it out.
+const powers = new Map<Network, { at: number; most: Map<string, number> }>();
+async function mostPower(net: Network, symbol: string): Promise<number> {
+  let kept = powers.get(net);
+  if (!kept || Date.now() - kept.at > 600_000) {
+    type Raw = { max_notional: string; max_leverage: number; maintenance_margin_rate: string; maintenance_amount: string };
+    const res = await ask(`${restOf(net)}/v2/markets`).catch(() => null);
+    const got = res?.ok ? ((await res.json().catch(() => null)) as { markets?: Record<string, { margin_tiers?: Raw[] }> } | null) : null;
+    if (got?.markets) {
+      const most = new Map<string, number>();
+      for (const [sym, m] of Object.entries(got.markets)) {
+        const tiers: Tier[] = (m.margin_tiers ?? []).map((t) => ({ maxNotional: Number(t.max_notional), maxPower: t.max_leverage, mmr: Number(t.maintenance_margin_rate), amount: Number(t.maintenance_amount) }));
+        most.set(sym, rulesFor(tiers, TOP_STAKE).maxPower);
+      }
+      kept = { at: Date.now(), most };
+      powers.set(net, kept);
+    }
+  }
+  return kept?.most.get(symbol) ?? POWER.max;
 }
 
 // Strike publishes its mark every few seconds, so one asked for within a moment is as good as a new one, and a crowd
 // of moves at once asks Strike once.
 const MARK_MS = 1500;
 const marks = new Map<string, { at: number; p: Promise<number> }>();
-function mark(net: Network, symbol: string): Promise<number> {
+function mark(net: Network, symbol: string, fresh = false): Promise<number> {
   const key = `${net}|${symbol}`;
   const kept = marks.get(key);
-  if (kept && Date.now() - kept.at < MARK_MS) return kept.p;
-  const p = fetch(`${restOf(net)}/price/v2/markPrice?symbol=${encodeURIComponent(symbol)}`, { cache: "no-store" })
+  if (kept && !fresh && Date.now() - kept.at < MARK_MS) return kept.p;
+  const p = ask(`${restOf(net)}/price/v2/markPrice?symbol=${encodeURIComponent(symbol)}`)
     .then(async (res) => (res.ok ? Number(((await res.json()) as { p?: string }).p) : NaN))
     .catch(() => NaN)
     .then((n) => {
@@ -76,21 +104,50 @@ function mark(net: Network, symbol: string): Promise<number> {
   return p;
 }
 
-// Whether Strike's mark has been down to (or up to) a price since a time: now, or in a candle that started after it.
-async function reached(net: Network, symbol: string, way: "down" | "up", price: number, since: number): Promise<boolean> {
-  const hit = (p: number) => (way === "down" ? p <= price * (1 + TOL) : p >= price * (1 - TOL));
-  if (hit(await mark(net, symbol))) return true;
+type Row = [number, string, string, string, string];
+async function candles(net: Network, symbol: string, interval: "1m" | "15m", limit: number): Promise<Row[]> {
+  const query = new URLSearchParams({ symbol, interval, limit: String(limit), priceType: "mark" });
+  const res = await ask(`${restOf(net)}/price/v2/klines?${query}`).catch(() => null);
+  if (!res?.ok) throw new Refused("Can't reach Strike's price", 502);
+  return (await res.json()) as Row[];
+}
+
+// The minute's candle so far: its low going down, its high going up. Taken as graves or a thundercloud go down.
+async function edge(net: Network, symbol: string, way: "down" | "up"): Promise<Edge | undefined> {
+  const [row] = (await candles(net, symbol, "1m", 1).catch(() => [])).slice(-1);
+  return row && { t: row[0], x: Number(way === "down" ? row[3] : row[2]) };
+}
+
+// Whether Strike's mark has been down to (or up to) a price since a time: right now, in a candle that started after it, or
+// in the candle it was in, if that candle went past where it had got to by then. Only candles allow half a tick, for rounding.
+async function reached(net: Network, symbol: string, tick: number, way: "down" | "up", price: number, since: number, at?: Edge): Promise<boolean> {
+  const now = await mark(net, symbol, true);
+  if (way === "down" ? now <= price : now >= price) return true;
+  const slack = tick / 2;
+  const hit = (p: number) => (way === "down" ? p <= price + slack : p >= price - slack);
+  const beyond = (p: number, x: number) => (way === "down" ? p < x : p > x);
   const span = Math.max(0, Date.now() - since);
   const interval = span > 480 * 60_000 ? "15m" : "1m";
   const ms = interval === "1m" ? 60_000 : 900_000;
-  const query = new URLSearchParams({ symbol, interval, limit: String(Math.min(500, Math.ceil(span / ms) + 1)), priceType: "mark" });
-  const res = await fetch(`${restOf(net)}/price/v2/klines?${query}`, { cache: "no-store" }).catch(() => null);
-  if (!res?.ok) throw new Refused("Can't reach Strike's price", 502);
-  const rows = (await res.json()) as [number, string, string, string, string][];
-  return rows.some(([t, , h, l]) => t >= since && hit(Number(way === "down" ? l : h)));
+  const rows = await candles(net, symbol, interval, Math.min(500, Math.ceil(span / ms) + 2));
+  return rows.some(([t, , h, l]) => {
+    const p = Number(way === "down" ? l : h);
+    if (t >= since) return hit(p);
+    return interval === "1m" && t + ms > since && !!at && at.t === t && beyond(p, at.x) && hit(p);
+  });
 }
 
-const pricesOf = (a: Game): Prices => ({ mark: () => mark(netIn(a), a.symbol), reached: (way, price, since) => reached(netIn(a), a.symbol, way, price, since) });
+const pricesOf = (a: Game): Prices => {
+  const net = netIn(a);
+  const tick = async () => (await info(net)).ticks.get(a.symbol) || 0;
+  return {
+    mark: () => mark(net, a.symbol),
+    tick,
+    most: () => mostPower(net, a.symbol),
+    edge: (way) => edge(net, a.symbol, way),
+    reached: async (way, price, since, at) => reached(net, a.symbol, await tick(), way, price, since, at),
+  };
+};
 
 export const online = () => !!process.env.ARENAS_TABLE;
 
@@ -169,6 +226,18 @@ async function ring(a: Game): Promise<number | undefined> {
   }
 }
 
+// The first copy of each game that may still have room. Copies only ever fill up, so the ones before it are never asked again.
+const rooms = new Map<string, { n: number; at: number }>();
+const roomKey = (a: Game, all: string[]) => pk(copyOf(a, 0, all));
+const firstRoom = (a: Game, all: string[]) => {
+  const kept = rooms.get(roomKey(a, all));
+  return Math.max(a.shard ?? 0, kept && Date.now() - kept.at < 60_000 ? kept.n : 0);
+};
+const roomAt = (a: Game, all: string[], n: number) => {
+  const key = roomKey(a, all);
+  if ((rooms.get(key)?.n ?? 0) <= n || Date.now() - (rooms.get(key)?.at ?? 0) >= 60_000) rooms.set(key, { n, at: Date.now() });
+};
+
 // Who's in each game asked about, and in every copy of it run beside it once it filled: under each copy's own id, and
 // under the game's id, the copy a new player would sit in.
 export async function lobby(ids: string[], net: Network = BUILT): Promise<Record<string, Player[]>> {
@@ -180,12 +249,13 @@ export async function lobby(ids: string[], net: Network = BUILT): Promise<Record
   const out: Record<string, Player[]> = {};
   await Promise.all(
     arenas.map(async (a) => {
-      for (let n = a.shard ?? 0; n < SHARDS; n++) {
+      for (let n = firstRoom(a, all); n < SHARDS; n++) {
         const s = copyOf(a, n, all);
         const players = (await items(s, { prefix: "p#" })).flatMap((x) => (x.player ? [x.player] : []));
         out[s.id] = players;
         if (players.length < SEATS) {
           out[a.id] = players;
+          roomAt(a, all, n);
           break;
         }
       }
@@ -195,6 +265,30 @@ export async function lobby(ids: string[], net: Network = BUILT): Promise<Record
 }
 
 const seatAt = async (a: Game, id: string) => (await db().send(new GetCommand({ TableName: table(), Key: { pk: pk(a), sk: `p#${id}` }, ConsistentRead: true }))).Item as Item | undefined;
+// The seat signed in to Strike that a browser has taken in a game, so the same browser can't take a second one on paper.
+const linkOf = async (a: Game, device: string) =>
+  ((await db().send(new GetCommand({ TableName: table(), Key: { pk: pk(a), sk: `d#${device}` }, ConsistentRead: true }))).Item as { seat?: string } | undefined)?.seat;
+const link = (a: Game, id: string, device: string) =>
+  db().send(
+    new TransactWriteCommand({
+      TransactItems: [
+        { Update: { TableName: table(), Key: { pk: pk(a), sk: `p#${id}` }, UpdateExpression: "ADD devices :d", ExpressionAttributeValues: { ":d": new Set([device]) } } },
+        { Put: { TableName: table(), Item: { pk: pk(a), sk: `d#${device}`, seat: id, expiresAt: until(a) } } },
+      ],
+    }),
+  );
+
+// A seat this browser already has in one copy of a game: as asked, its own on paper while signing in, or the signed in
+// seat it took before while asking on paper. One human, one seat.
+async function already(s: Game, id: string, device: string): Promise<Player | undefined> {
+  const [mine, paper, linked] = await Promise.all([seatAt(s, id), id !== device ? seatAt(s, device) : undefined, id === device ? linkOf(s, device) : undefined]);
+  if (mine?.player) {
+    if (id !== device && !mine.devices?.has(device)) await link(s, id, device);
+    return mine.player;
+  }
+  if (paper?.player) return paper.player;
+  if (linked) return (await seatAt(s, linked))?.player;
+}
 
 // The Strike account a signed GET /v2/account belongs to, by asking Strike with it while its timestamp still holds.
 export type Proof = { key: string; signature: string; timestamp: string; nonce: string };
@@ -202,9 +296,8 @@ async function accountOf(proof: unknown, net: Network): Promise<string> {
   const p = proof as Partial<Proof> | null;
   const ok = (v: unknown, re: RegExp) => typeof v === "string" && re.test(v);
   if (!p || !ok(p.key, /^[0-9a-f]{64}$/) || !ok(p.signature, /^[0-9a-f]{128}$/) || !ok(p.timestamp, /^\d{9,11}$/) || !ok(p.nonce, /^[0-9a-f-]{36}$/)) throw new Refused("That's not a Strike sign-in", 401);
-  const res = await fetch(`${restOf(net)}/v2/account`, {
+  const res = await ask(`${restOf(net)}/v2/account`, {
     headers: { "X-API-Wallet-Public-Key": p.key!, "X-API-Wallet-Signature": p.signature!, "X-API-Wallet-Timestamp": p.timestamp!, "X-API-Wallet-Nonce": p.nonce! },
-    cache: "no-store",
   }).catch(() => null);
   if (!res) throw new Refused("Can't reach Strike", 502);
   if (!res.ok) throw new Refused("Strike didn't know that sign-in", 401);
@@ -224,16 +317,24 @@ export async function join(a: Game, body: Record<string, unknown>): Promise<{ pl
   if (typeof role !== "string" || !Object.hasOwn(ROLES, role)) throw new Refused("Pick a ghost");
   const id = body.proof ? accountSeat(netIn(a), await accountOf(body.proof, netIn(a))) : device;
   const all = await symbols(netIn(a));
-  for (let n = a.shard ?? 0; n < SHARDS; n++) {
+  const from = a.shard ?? 0;
+  const first = firstRoom(a, all);
+  // Copies known to be full are only looked at for a seat this browser already has there.
+  const full = Array.from({ length: first - from }, (_, i) => copyOf(a, from + i, all));
+  const found = await Promise.all(full.map((s) => already(s, id, device)));
+  const at = found.findIndex(Boolean);
+  if (at >= 0) return { player: found[at]!, arena: full[at] };
+  for (let n = first; n < SHARDS; n++) {
     const s = copyOf(a, n, all);
-    const kept = await seatAt(s, id);
-    if (kept?.player) {
-      if (id !== device) await db().send(new UpdateCommand({ TableName: table(), Key: { pk: pk(s), sk: `p#${id}` }, UpdateExpression: "ADD devices :d", ExpressionAttributeValues: { ":d": new Set([device]) } }));
-      return { player: kept.player, arena: s };
-    }
+    const kept = await already(s, id, device);
+    if (kept) return { player: kept, arena: s };
     if (!doorsOpen(s, Date.now())) throw new Refused("That game has started without you", 409);
     const player = await sit(s, id, device, name, role, body.live === true);
-    if (player) return { player, arena: s };
+    if (player) {
+      roomAt(a, all, n);
+      return { player, arena: s };
+    }
+    roomAt(a, all, n + 1);
   }
   throw new Refused("Every game of that kind is full: try the next one", 409);
 }
@@ -262,6 +363,7 @@ async function sit(a: Game, id: string, device: string, name: string, role: Role
                 ConditionExpression: "attribute_not_exists(sk)",
               },
             },
+            ...(id !== device ? [{ Put: { TableName: table(), Item: { pk: pk(a), sk: `d#${device}`, seat: id, expiresAt: until(a) } } }] : []),
             { Put: { TableName: table(), Item: { pk: pk(a), sk: `n#${player.name.toLowerCase()}`, expiresAt: until(a) }, ConditionExpression: "attribute_not_exists(sk)" } },
           ],
         }),

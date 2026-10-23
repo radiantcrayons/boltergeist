@@ -61,6 +61,9 @@ const yours = (g: Game | undefined) => g?.fighters.find((f) => f.id === YOU);
 const FEE_RATE = STRIKE.taker + BUILDER.feeBps / 10_000;
 // How long a game played online waits past the bell for the game's price to end on, before ending on its own.
 const BELL_WAIT = 8000;
+// A gap between prices longer than this is caught up from candles, and a catch up that didn't work is tried again after RETRY.
+const GAP = 10_000;
+const RETRY = 15_000;
 // Saving the games is put off to now and then, but never past a change in what's on Strike.
 const SAVE_MS = 5000;
 const onStrike = (games: Game[]) =>
@@ -163,25 +166,51 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     }
   }, [sync]);
 
+  // A game that's gone a while without a price (a phone in a pocket, a tab asleep) is caught up from Strike's candles rather
+  // than in one step, so it plays out as it did for everyone else. A catch up that fails is tried again now and then.
+  const tried = useRef(new Map<string, number>());
+  const behind = useCallback(
+    (g: Game, at: number) => {
+      const now = Date.now();
+      if (g.over || g.at < g.startsAt || syncing.current.has(g.id) || at - g.at <= GAP || now - (tried.current.get(g.id) ?? 0) < RETRY) return false;
+      tried.current.set(g.id, now);
+      sync(g);
+      return true;
+    },
+    [sync],
+  );
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState === "visible") for (const g of latest.current.games) behind(g, Date.now());
+    };
+    document.addEventListener("visibilitychange", back);
+    return () => document.removeEventListener("visibilitychange", back);
+  }, [behind]);
+
   // Games move on by Strike's marks, at the time Strike gives each one, so every browser sees the bots act at the same
   // prices. The clock alone only walks a game up to its start, and over the bell. A game played online waits a moment
   // at the bell for the game's price, so everyone in it ends on the same one.
   const moveOn = useCallback(
-    (all: Record<string, Mark>, ticking: boolean) =>
-      setGames((gs) =>
-        gs.some((g) => !g.over && all[g.symbol])
-          ? gs.map((g) => {
-              const m = all[g.symbol];
-              if (g.over || !m || syncing.current.has(g.id)) return g;
-              const now = Date.now();
-              const bar = { h: m.p, l: m.p, c: m.p };
-              let at = ticking ? (now < g.startsAt ? now : now >= g.endsAt ? now : g.at) : Math.max(m.at, Math.min(now, g.startsAt - 1));
-              if (at >= g.endsAt && g.me && g.bell === undefined && now < g.endsAt + BELL_WAIT) at = Math.max(g.at, g.endsAt - 1);
-              return at > g.at ? advance(g, bar, at) : g;
-            })
-          : gs,
-      ),
-    [],
+    (all: Record<string, Mark>, ticking: boolean) => {
+      if (!ticking) for (const g of latest.current.games) if (all[g.symbol]) behind(g, all[g.symbol].at);
+      setGames((gs) => {
+        if (!gs.some((g) => !g.over && all[g.symbol])) return gs;
+        let moved = false;
+        const next = gs.map((g) => {
+          const m = all[g.symbol];
+          if (g.over || !m || syncing.current.has(g.id)) return g;
+          const now = Date.now();
+          const bar = { h: m.p, l: m.p, c: m.p };
+          let at = ticking ? (now < g.startsAt ? now : now >= g.endsAt ? now : g.at) : Math.max(m.at, Math.min(now, g.startsAt - 1));
+          if (at >= g.endsAt && g.me && g.bell === undefined && now < g.endsAt + BELL_WAIT) at = Math.max(g.at, g.endsAt - 1);
+          const after = at > g.at ? advance(g, bar, at) : g;
+          if (after !== g) moved = true;
+          return after;
+        });
+        return moved ? next : gs;
+      });
+    },
+    [behind],
   );
   useEffect(() => moveOn(marks, false), [marks, moveOn]);
   useEffect(() => {

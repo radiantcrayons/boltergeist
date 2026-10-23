@@ -119,6 +119,11 @@ export type Move = {
 };
 // `bell` is the price the game ended at, as the game server took it; `next` is where the next look picks up from.
 export type Log = { players: Player[]; moves: Move[]; bell?: number; next?: string };
+// The moves taken in, by the game server's ids, which start with the time it took them: every one up to `upTo`, and those after.
+export type Seen = { upTo?: string; ids: string[] };
+const keyOf = (m: Move) => m.id ?? `${m.at}#${m.who}#${m.what}`;
+// Ids a couple of minutes older than the moves still coming in are folded into `upTo`, so the list stays short.
+const FOLD = 120_000;
 
 export type Event = {
   at: number;
@@ -152,9 +157,9 @@ export type Game = {
   at: number;
   over: boolean;
   feed: Event[];
-  // Playing online: who you are in the game, and how many of its moves are in.
+  // Playing online: who you are in the game, and which of its moves are in (a count, in games saved before ids).
   me?: string;
-  seen?: number;
+  seen?: Seen | number;
   bell?: number;
 };
 
@@ -368,7 +373,7 @@ export function enter(arena: Arena, role: Role, price: number, now: number, opts
     at: Math.min(now, arena.startsAt),
     over: false,
     feed: [{ at: now, who: "you", what: "join" as const, role }, ...joins].slice(0, FEED),
-    ...(opts.me && { me: opts.me, seen: 0 }),
+    ...(opts.me && { me: opts.me, seen: { ids: [] } }),
   };
 }
 
@@ -397,12 +402,21 @@ export function heed(game: Game, log: Log, until: number): Game {
   let g: Game = fresh.length ? { ...game, fighters: seat(game, [...game.fighters, ...fresh.map((p) => newcomer(p))], Math.max(game.at, until), events) } : game;
   if (events.length) g = { ...g, feed: [...events.sort((x, y) => y.at - x.at), ...g.feed].slice(0, FEED) };
   if (log.bell && !g.bell) g = { ...g, bell: log.bell };
-  let seen = g.seen ?? 0;
-  while (seen < log.moves.length && log.moves[seen].at <= until) {
-    const m = log.moves[seen++];
-    if (m.who !== g.me) g = move(g, m);
+  const was: Seen = typeof g.seen === "object" ? g.seen : { ids: log.moves.slice(0, g.seen ?? 0).map(keyOf) };
+  const had = new Set(was.ids);
+  const due = log.moves
+    .filter((m) => m.at <= until && !had.has(keyOf(m)) && !(was.upTo !== undefined && m.id !== undefined && m.id <= was.upTo))
+    .sort((x, y) => x.at - y.at || (keyOf(x) < keyOf(y) ? -1 : 1));
+  if (!due.length && typeof g.seen === "object") return g;
+  for (const m of due) if (m.who !== g.me) g = move(g, m);
+  const old = String(Math.max(0, Math.floor(until - FOLD))).padStart(13, "0");
+  let upTo = was.upTo;
+  const ids: string[] = [];
+  for (const k of [...was.ids, ...due.map(keyOf)]) {
+    if (/^\d{13}#/.test(k) && k.slice(0, 13) < old) upTo = upTo === undefined || k > upTo ? k : upTo;
+    else ids.push(k);
   }
-  return seen === g.seen ? g : { ...g, seen };
+  return { ...g, seen: { ...(upTo !== undefined && { upTo }), ids } };
 }
 
 // Another player's move, as the game server took it. Their graves and thunderclouds spring here by the price, as everyone's do;

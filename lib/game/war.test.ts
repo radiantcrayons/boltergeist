@@ -369,6 +369,8 @@ test("a full game runs again side by side: the same market and times under an id
   );
 });
 
+const taken = (g: Game) => (typeof g.seen === "object" ? g.seen.ids.length : g.seen);
+
 test("another player's call, bank and K.O. land as they made them, and their own moves aren't taken twice", () => {
   const a = arena("battle");
   const log: Log = {
@@ -385,13 +387,13 @@ test("another player's call, bank and K.O. land as they made them, and their own
   let g = quietBots(enter(a, "commando", 100, now, { me: "me", players: log.players }));
   g = heed(g, log, now + 3500);
   const ann = () => g.fighters.find((f) => f.id === "ann")!;
-  assert.equal(g.seen, 3);
+  assert.equal(taken(g), 3);
   assert.equal(ann().call, null);
   near(ann().cash, valueOf(opening("long", 10, 100, 10, now + 1000), 102));
   assert.equal(me(g).call, null);
   g = heed(g, log, now + 9000);
   assert.equal(ann().out?.by, "ko");
-  assert.equal(g.seen, 5);
+  assert.equal(taken(g), 5);
   assert.equal(heed(g, log, now + 9000), g);
 });
 
@@ -582,4 +584,24 @@ test("live graves and thundercloud go by Strike: not sprung or struck by the pri
   near(me(g).cash, valueOf(c, 99.61, STRIKE.maker));
   assert.deepEqual([g.feed[0].what, g.feed[0].price, g.feed[0].maker], ["bank", 99.61, true]);
   assert.equal(me(plantFlag(trapped(setTrap(started(), "long", 10, 99, now + 2000, { live: "tw-t", size: 5 }), { entry: 99, fee: 0, koAt: 90, live: "tw-t", size: 5 }, now + 3000), undefined, now + 3000)).call?.flagOrder, undefined);
+});
+
+test("moves are taken in by id, so one that arrives late, or a full look in a new order, never skips or repeats one", () => {
+  const a = arena("battle");
+  const call = { at: now + 1000, who: "ann", what: "call", side: "long", power: 10, entry: 100, id: `${String(now + 1000).padStart(13, "0")}#ann#00001` } as const;
+  const late = { at: now + 1500, who: "bob", what: "call", side: "short", power: 10, entry: 100, id: `${String(now + 1500).padStart(13, "0")}#bob#00001` } as const;
+  const bank = { at: now + 2000, who: "ann", what: "bank", price: 101, id: `${String(now + 2000).padStart(13, "0")}#ann#00002` } as const;
+  const players = [p("ann", now - 5000), p("bob", now - 5000), p("me", now - 4000)];
+  const quiet = (g: Game): Game => ({ ...g, fighters: g.fighters.map((f) => (f.nerve ? { ...f, nerve: { ...f.nerve, nextAt: Infinity } } : f)) });
+  let g = quiet(enter(a, "commando", 100, now, { me: "me", players }));
+  // Bob's call lands after Ann's bank in the list, though it came first.
+  g = heed(g, { players, moves: [call, bank] }, now + 3000);
+  g = heed(g, { players, moves: [call, bank, late] }, now + 3000);
+  const bob = () => g.fighters.find((f) => f.id === "bob")!;
+  assert.equal(bob().call?.side, "short");
+  const annCash = g.fighters.find((f) => f.id === "ann")!.cash;
+  // A full look from the start, sorted by time, changes nothing.
+  g = heed(g, { players, moves: [call, late, bank] }, now + 3000);
+  assert.equal(g.fighters.find((f) => f.id === "ann")!.cash, annCash);
+  assert.equal(taken(g), 3);
 });
