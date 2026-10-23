@@ -1016,6 +1016,9 @@ export function Field(props: Props) {
   // How far into view each tall thing has faded, by its tile, so nothing pops in or out.
   const fades = useRef(new Map<string, number>());
   const fadeAt = useRef(0);
+  // Where each rival is shown, gliding after where they really are when they move.
+  const glides = useRef(new Map<string, number>());
+  const appears = useRef(new Map<string, number>());
   const writing = useRef<HTMLCanvasElement | null>(null);
   const asked = useRef("");
   const trodden = useRef({ key: "", seen: new Map<string, boolean>() });
@@ -1698,19 +1701,20 @@ export function Field(props: Props) {
 
     // Your graves: a line of them on your line, centred on the kids, set in the ground itself, so as the field moves on the one at
     // the back sinks into the earth and a new one rises at the front. They sink away as your ghosts swirl up out of them.
-    const graveRow = (ya: number, count: number, side: Side, sink: number) => {
-      const xs = row(count);
-      const gap = gapOf(count);
-      const tight = gap < across * 0.7;
-      const x0 = xs[0].x - gap * 0.5;
-      const x1 = xs[xs.length - 1].x + gap * 0.5;
+    // Others' graves go through here too, in their own colour, further along and closer set.
+    const graveRow = (ya: number, count: number, side: Side, sink: number, o: { shift?: number; gap?: number; tint?: string; size?: number } = {}) => {
+      const gap = o.gap ?? gapOf(count);
+      const tight = !o.gap && gap < across * 0.7;
+      const mid = -KIDS_BACK + (o.shift ?? 0);
+      const x0 = mid - (count * gap) / 2;
+      const x1 = mid + (count * gap) / 2;
       for (let i = Math.floor((nowX + x0) / gap); i * gap - nowX < x1; i++) {
         const x = i * gap - nowX;
         const e = clamp((x - x0) / (gap * 0.9), 0, 1) * clamp((x1 - x) / (gap * 0.9), 0, 1) * sink;
         if (e < 0.02) continue;
         const y = ya + (hash(i * 3.7) - 0.5) * 0.14 + (tight ? (i % 2 ? 0.26 : -0.26) : 0);
         const v = Math.floor(hash(i * 5.3) * 4);
-        const stone = graveSprite(A, side, v, scale * 1.5);
+        const stone = graveSprite(A, side, v, scale * (o.size ?? 1.5), o.tint);
         casters.push({ x, y, tall: ease(e), shape: () => stone });
         shadows.push(() => {
           const p = S(x, y);
@@ -1721,7 +1725,7 @@ export function Field(props: Props) {
           blit(ctx, moundSprite(A, false, scale * 1.3), p, Math.min(1, e * 2));
           risen(stone, p, ease(e), 1, 0.05 * A);
           blit(ctx, moundSprite(A, true, scale * 1.3), p, Math.min(1, e * 2));
-          if (e > 0.5) glows.push({ p: { x: p.x, y: p.y - 0.45 * A * scale }, r: 0.5 * A * scale, rgb: side === "long" ? "130, 240, 190" : "250, 150, 170", a: 0.45 * e });
+          if (e > 0.5 && !o.tint) glows.push({ p: { x: p.x, y: p.y - 0.45 * A * scale }, r: 0.5 * A * scale, rgb: side === "long" ? "130, 240, 190" : "250, 150, 170", a: 0.45 * e });
         });
       }
     };
@@ -1854,8 +1858,19 @@ export function Field(props: Props) {
     // Everyone else, each player in their own hue, in a column just east of yours: graves of their colour on the row where theirs
     // wait, and their ghost on the row where they came in once they're in. Smaller than yours, staggered where several share a row.
     const crowd = new Map<number, number>();
+    if (glides.current.size > 64) glides.current.clear();
+    if (appears.current.size > 64) appears.current.clear();
+    // How far a rival's graves or ghost have come into view since they first showed.
+    const appear = (key: string) => {
+      const v = Math.min(1, (appears.current.get(key) ?? 0) + fadeStep * 0.6);
+      appears.current.set(key, v);
+      return v;
+    };
     for (const r of pins) {
-      const y = yOf(r.p);
+      const was = glides.current.get(r.id) ?? r.p;
+      const at0 = was + (r.p - was) * fadeStep;
+      glides.current.set(r.id, at0);
+      const y = yOf(at0);
       if (!onMap(y)) continue;
       const lane = Math.round(y * 2);
       const n = crowd.get(lane) ?? 0;
@@ -1865,21 +1880,7 @@ export function Field(props: Props) {
       const x = -KIDS_BACK + 5.5 + n * 1.05;
       const ry = y + (n ? (n % 2 ? 0.28 : -0.28) : 0);
       if (!r.call) {
-        for (const [j, gx] of [x - 0.24, x + 0.24].entries()) {
-          const gy = ry + (j ? 0.12 : -0.12);
-          const stone = graveSprite(A, r.side, j + Math.floor(hash([...r.id].reduce((h, ch) => h + ch.charCodeAt(0), 0) * 3.1) * 4), scale * 1.2, r.hue);
-          casters.push({ x: gx, y: gy, shape: () => stone });
-          shadows.push(() => {
-            const p = S(gx, gy);
-            blob(ctx, p.x + 0.12 * A, p.y - 0.05 * A, 0.28 * A * scale, 0.12 * A * scale, [110, 118, 150], 0.45 * sun);
-          });
-          put(gx, gy, () => {
-            const p = S(gx, gy);
-            blit(ctx, moundSprite(A, false, scale * 1.05), p, 1);
-            blit(ctx, stone, p, 1);
-            blit(ctx, moundSprite(A, true, scale * 1.05), p, 1);
-          });
-        }
+        graveRow(ry, 2, r.side, appear(`${r.id}|graves`), { shift: x + KIDS_BACK, gap: 0.55, tint: r.hue, size: 1.2 });
         continue;
       }
       const seed = hash([...r.id].reduce((h, ch) => h + ch.charCodeAt(0), 0) * 1.7);
@@ -1887,7 +1888,7 @@ export function Field(props: Props) {
       const z = (5 + Math.sin(phase) * 2) * s * k;
       const f = ghostAt(rk, hex(r.hue), Math.round(1.9 * s * k * dpr * 10) / 10, 0, false, facing(x, ry));
       const st = 1 / dpr;
-      const alpha = 0.95;
+      const alpha = 0.95 * appear(`${r.id}|ghost`);
       shadows.push(() => {
         const p = S(x, ry);
         blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.45 * sun * alpha);
