@@ -12,7 +12,8 @@ export class Refused extends Error {
 export type Edge = { t: number; x: number };
 // What the game knows a player has on: their call or graves, each with its thundercloud, as the game took them.
 export type Held = { side: Side; power: number; price: number; at: number; flag?: number; flagAt?: number; edge?: Edge; flagEdge?: Edge };
-export type State = { n: number; lastAt: number; call?: Held; trap?: Held; out?: boolean };
+// `k` and `sk`: the key the last move was sent with, and where that move was kept, so a retry of it is known.
+export type State = { n: number; lastAt: number; call?: Held; trap?: Held; out?: boolean; k?: string; sk?: string };
 
 // How far graves or a thundercloud can sit from the price.
 export const REACH = 0.2;

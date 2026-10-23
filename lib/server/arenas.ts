@@ -4,6 +4,8 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactW
 import { awsCredentialsProvider } from "@vercel/oidc-aws-credentials-provider";
 import { arenaOf, doorsOpen, POWER, ROLES, ROSTER, rulesFor, SEATS, SHARDS, shardOf, TOP_STAKE, type Arena, type Log, type Move, type Player, type Role, type Tier } from "../game/war.ts";
 import { BUILT, restOf, type Network } from "../strike.ts";
+import { backoff, busy, patient } from "./dynamo.ts";
+import { GAME, problem } from "./inputs.ts";
 import { Refused, rule, type Edge, type Prices, type State } from "./moves.ts";
 
 export { Refused };
@@ -18,6 +20,7 @@ function db(): DynamoDBDocumentClient {
     new DynamoDBClient({
       // Vercel keeps AWS_REGION for itself.
       region: process.env.DYNAMODB_REGION ?? "us-east-1",
+      retryStrategy: patient(),
       ...(roleArn && { credentials: awsCredentialsProvider({ roleArn }) }),
       ...(endpoint && { endpoint, credentials: { accessKeyId: "local", secretAccessKey: "local" } }),
     }),
@@ -151,7 +154,19 @@ const pricesOf = (a: Game): Prices => {
 
 export const online = () => !!process.env.ARENAS_TABLE;
 
+// Settings that are there but wrong, said once in the logs and to every caller, rather than the game quietly going offline.
+let said = false;
+export function misconfigured(): string | null {
+  const wrong = problem();
+  if (wrong && !said) {
+    said = true;
+    console.error(`game server misconfigured: ${wrong}`);
+  }
+  return wrong;
+}
+
 export async function arena(id: string, net: Network = BUILT): Promise<Game> {
+  if (!GAME.test(id)) throw new Refused("No such game", 404);
   const a = arenaOf(id, await symbols(net));
   if (!a) throw new Refused("No such game", 404);
   return { ...a, net };
@@ -243,7 +258,7 @@ const roomAt = (a: Game, all: string[], n: number) => {
 export async function lobby(ids: string[], net: Network = BUILT): Promise<Record<string, Player[]>> {
   const all = await symbols(net);
   const arenas = ids.flatMap((id): Game[] => {
-    const a = arenaOf(id, all);
+    const a = GAME.test(id) ? arenaOf(id, all) : null;
     return a ? [{ ...a, net }] : [];
   });
   const out: Record<string, Player[]> = {};
@@ -378,27 +393,35 @@ async function sit(a: Game, id: string, device: string, name: string, role: Role
         taken++;
         continue;
       }
-      // Others taking a seat at the same moment.
-      if (codes.includes("TransactionConflict") && tries < 6) await new Promise((r) => setTimeout(r, Math.random() * 100 * tries));
+      // Others taking a seat at the same moment, or the table too busy for a moment.
+      if ((codes.includes("TransactionConflict") || busy(err)) && tries < 6) await new Promise((r) => setTimeout(r, backoff(tries, busy(err))));
       else throw err;
     }
   }
 }
 
 // A move, checked against what the player has on (lib/server/moves.ts) and written with what it leaves them with, both at once:
-// a second move racing it from the same player waits its turn rather than slipping past the checks.
+// a second move racing it from the same player waits its turn rather than slipping past the checks. A move sent again with
+// the same key, because the answer to it got lost, gets back the move that went in the first time rather than a second.
+const KEY = /^[0-9a-f-]{16,64}$/i;
 export async function act(a: Game, body: Record<string, unknown>): Promise<Move> {
   const device = playerOf(body.secret);
   if (!device) throw new Refused("Who are you?", 401);
   if (Date.now() < a.startsAt || Date.now() > a.endsAt + 5000) throw new Refused("That game isn't on");
   const id = typeof body.seat === "string" && /^[0-9a-f]{16}$/.test(body.seat) ? body.seat : device;
+  const key = typeof body.key === "string" && KEY.test(body.key) ? body.key : undefined;
   for (let tries = 1; ; tries++) {
     const seat = await seatAt(a, id);
     if (!seat?.player || (id !== device && !seat.devices?.has(device))) throw new Refused("You're not in that game", 403);
     const was: State = seat.state ?? { n: 0, lastAt: 0 };
+    if (key && was.k === key && was.sk) {
+      const kept = (await db().send(new GetCommand({ TableName: table(), Key: { pk: pk(a), sk: was.sk }, ConsistentRead: true }))).Item as Item | undefined;
+      if (kept?.move) return { ...kept.move, id: was.sk.slice(2) };
+    }
     const now = Math.max(Date.now(), was.lastAt + 1);
-    const { move: asked, state } = await rule(a.kind, was, body, now, pricesOf(a));
-    const sk = moveSk(now, id, state.n);
+    const { move: asked, state: after } = await rule(a.kind, was, body, now, pricesOf(a));
+    const sk = moveSk(now, id, after.n);
+    const state: State = { ...after, k: key, sk: key && sk };
     const move: Move = { at: now, who: id, ...asked };
     try {
       await db().send(
@@ -421,7 +444,7 @@ export async function act(a: Game, body: Record<string, unknown>): Promise<Move>
       return { ...move, id: sk.slice(2) };
     } catch (err) {
       const codes = (err as { CancellationReasons?: { Code?: string }[] }).CancellationReasons?.map((r) => r.Code) ?? [];
-      if ((codes[0] === "ConditionalCheckFailed" || codes.includes("TransactionConflict")) && tries < 5) await new Promise((r) => setTimeout(r, Math.random() * 50 * tries));
+      if ((codes[0] === "ConditionalCheckFailed" || codes.includes("TransactionConflict") || busy(err)) && tries < 6) await new Promise((r) => setTimeout(r, backoff(tries, busy(err))));
       else throw err;
     }
   }

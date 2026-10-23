@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { caught, close, filledOf, hit, lay, lift, open, plant } from "../live/desk";
 import { strike } from "../live/exchange";
 import { BUILDER, type Session } from "../live/session";
-import { Full, gather, join, look, tell } from "../online";
+import { Full, gather, join, look, tell, Wait } from "../online";
 import { PREFIX } from "../store";
 import { klines, NETWORK, type Mark } from "../strike";
 import type { Market } from "../types";
@@ -179,12 +179,22 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     },
     [sync],
   );
+  // Coming back by any way a browser has: the tab shown again, a page restored from the back button's cache, the window
+  // focused, or a frozen page resumed.
   useEffect(() => {
     const back = () => {
       if (document.visibilityState === "visible") for (const g of latest.current.games) behind(g, Date.now());
     };
     document.addEventListener("visibilitychange", back);
-    return () => document.removeEventListener("visibilitychange", back);
+    document.addEventListener("resume", back);
+    window.addEventListener("pageshow", back);
+    window.addEventListener("focus", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      document.removeEventListener("resume", back);
+      window.removeEventListener("pageshow", back);
+      window.removeEventListener("focus", back);
+    };
   }, [behind]);
 
   // Games move on by Strike's marks, at the time Strike gives each one, so every browser sees the bots act at the same
@@ -224,6 +234,8 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   const looking = useRef(new Set<string>());
   useEffect(() => {
     const timer = setInterval(() => {
+      // Asked again here, as a hidden page's held timers can run before it says it's back.
+      if (document.hidden) return;
       for (const g of latest.current.games) {
         if (!g.me || g.over || syncing.current.has(g.id) || looking.current.has(g.id)) continue;
         looking.current.add(g.id);
@@ -241,7 +253,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   }, [update]);
 
   const announce = useCallback((g: Game, m: Omit<Move, "at" | "who">) => {
-    if (g.me) tell(g.id, g.me, m).catch((err: Error) => setError(`The game missed that: ${err.message}`));
+    if (g.me) tell(g.id, g.me, m).catch((err: Error) => setError(err instanceof Wait ? err.message : `The game missed that: ${err.message}`));
   }, []);
 
   // Your graves springing and thunderclouds striking happen here by the price: the game server hears of them too.

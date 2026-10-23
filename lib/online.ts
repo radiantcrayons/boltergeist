@@ -49,17 +49,41 @@ const local = (log: Log): Log => ({
 });
 
 export class Full extends Error {}
+// The game server asked for a pause: nothing more goes its way until it's over.
+export class Wait extends Error {}
 class Down extends Error {}
+class Lost extends Error {}
 
 // Once the game server says it's offline, this browser plays on with bots and stops asking.
 let offline = false;
 
+// Until when each of the game server's routes asked to be left alone, from its Retry-After: a minute if it doesn't say, five at most.
+const held = new Map<string, number>();
+const routeOf = (path: string) => (path.startsWith("/api/arenas/") ? "game" : path.split("?")[0]);
+function holdFrom(res: Response): number {
+  const said = res.headers.get("retry-after")?.trim() ?? "";
+  const secs = /^\d+$/.test(said) ? Number(said) : said ? (Date.parse(said) - Date.now()) / 1000 : NaN;
+  return Math.min(300, Math.max(1, Number.isFinite(secs) ? secs : 60)) * 1000;
+}
+const wait = (ms: number) => new Wait(`The game server asked us to wait ${Math.ceil(ms / 1000)} s`);
+
 async function send<T>(path: string, init?: RequestInit, fresh = init?.method === "POST"): Promise<T | null> {
   if (offline) return null;
+  const route = routeOf(path);
+  const left = (held.get(route) ?? 0) - Date.now();
+  if (left > 0) throw wait(left);
   const sent = Date.now();
   const res = await fetch(path, init).catch(() => null);
-  if (res?.status === 503) offline = true;
-  if (!res || res.status === 503) return null;
+  if (!res) throw new Lost("Can't reach the game server");
+  if (res.status === 503) {
+    offline = true;
+    return null;
+  }
+  if (res.status === 429) {
+    const ms = holdFrom(res);
+    held.set(route, Date.now() + ms);
+    throw wait(ms);
+  }
   const body = (await res.json().catch(() => ({}))) as T & { error?: string; now?: number };
   if (res.status === 409) throw new Full(body.error ?? "That game is full");
   if (res.status >= 500) throw new Down(body.error ?? `The game said ${res.status}`);
@@ -87,22 +111,24 @@ export async function join(arena: string, role: Role, live: boolean, keys?: Keys
   const { secret, name } = await me();
   const proof = keys ? await proofOf(keys).catch(() => undefined) : undefined;
   const got = await send<{ player: Player; arena?: string; log: Log }>(`/api/arenas/${arena}?net=${NETWORK}`, { method: "POST", body: JSON.stringify({ secret, name, role, live, what: "join", ...(proof && { proof }) }) }).catch((err) => {
-    if (err instanceof Down) return null;
+    if (err instanceof Down || err instanceof Lost) return null;
     throw err;
   });
   return got && { me: got.player.id, arena: got.arena ?? arena, joinedAt: got.player.joinedAt - skew, log: local(got.log) };
 }
 
-// A move in a game, as the seat it was taken as.
+// A move in a game, as the seat it was taken as. Only a move that may not have arrived (no answer, or the server failing) is sent
+// again, with the same key so the game server keeps it once; one turned away stays turned away.
 export async function tell(arena: string, seat: string, move: Omit<Move, "at" | "who">): Promise<void> {
   const { secret } = await me();
-  for (let tries = 0; tries < 3; tries++) {
+  const key = crypto.randomUUID();
+  for (let tries = 0; ; tries++) {
     try {
-      await send(`/api/arenas/${arena}?net=${NETWORK}`, { method: "POST", body: JSON.stringify({ ...move, secret, seat }) });
+      await send(`/api/arenas/${arena}?net=${NETWORK}`, { method: "POST", body: JSON.stringify({ ...move, secret, seat, key }) });
       return;
     } catch (err) {
-      if (tries === 2) throw err;
-      await new Promise((r) => setTimeout(r, 500 * (tries + 1)));
+      if (!(err instanceof Down || err instanceof Lost) || tries >= 2) throw err;
+      await new Promise((r) => setTimeout(r, 500 * 2 ** tries + Math.random() * 250));
     }
   }
 }

@@ -348,3 +348,50 @@ test("one browser holds one seat in a game, on paper or signed in, whichever it 
   await store.act(a, { secret: liveFirst, seat: paper.player.id, what: "call", side: "long", power: 5 });
   assert.equal((await store.log(a, { fresh: true })).players.length, 2);
 });
+
+test("a move sent again because its answer got lost is kept once, and a different move goes on as before", async () => {
+  const a = await battle();
+  const me = secret();
+  await store.join(a, { secret: me, name: "Lost Answer", role: "commando" });
+  clock += 1000;
+  const key = "5b7e2c3a-1f4d-4e6b-9a8c-0d1e2f3a4b5c";
+  const call = await store.act(a, { secret: me, what: "call", side: "long", power: 10, key });
+  clock += 1000;
+  const again = await store.act(a, { secret: me, what: "call", side: "long", power: 10, key });
+  assert.deepEqual(again, call);
+  clock += 1000;
+  const bank = await store.act(a, { secret: me, what: "bank", key: "6c8f3d4b-2a5e-4f7c-8b9d-1e2f3a4b5c6d" });
+  const bankAgain = await store.act(a, { secret: me, what: "bank", key: "6c8f3d4b-2a5e-4f7c-8b9d-1e2f3a4b5c6d" });
+  assert.deepEqual(bankAgain, bank);
+  await assert.rejects(store.act(a, { secret: me, what: "bank", key: "7d9a4e5c-3b6f-4a8d-9cae-2f3a4b5c6d7e" }), /Nothing to give up/);
+  const log = await store.log(a, { fresh: true });
+  assert.deepEqual(log.moves, [call, bank]);
+});
+
+test("what anyone can send is turned away as a mistake, never a failure", async () => {
+  for (const id of ["a".repeat(5000), "skirmish-ZZ", "__proto__-x", "skirmish-hsf0g-99", "../../etc"]) {
+    await assert.rejects(store.arena(id), (err: { status?: number }) => err.status === 404);
+  }
+  const a = await battle();
+  const me = secret();
+  await store.join(a, { secret: me, name: "Odd Sender", role: "soldier" });
+  clock += 1000;
+  const odd: Record<string, unknown>[] = [
+    { secret: me, what: { nested: { deeper: [1, 2, 3] } } },
+    { secret: me, what: "call", side: ["long"], power: 10 },
+    { secret: me, what: "call", side: "long", power: "10" },
+    { secret: me, what: "call", side: "long", power: 1e308 },
+    { secret: me, what: "trap", side: "long", power: 10, price: { $gt: 0 } },
+    { secret: me, what: "trap", side: "long", power: 10, price: -1 },
+    { secret: me, what: "flag", price: "x".repeat(3000) },
+    { secret: me, what: "bank", key: { toString: 1 } },
+    { secret: { a: 1 }, what: "call", side: "long", power: 10 },
+  ];
+  for (const body of odd) {
+    await assert.rejects(store.act(a, body), (err: { status?: number }) => typeof err.status === "number" && err.status >= 400 && err.status < 500, JSON.stringify(body).slice(0, 80));
+  }
+  // A seat that isn't one is ignored: the move is the browser's own.
+  const own = await store.act(a, { secret: me, seat: "x".repeat(400), what: "call", side: "long", power: 10 });
+  assert.equal(own.what, "call");
+  assert.equal(await store.lobby(["a".repeat(5000), "../x", a.id]).then((l) => Object.keys(l).includes("../x")), false);
+});

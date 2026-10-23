@@ -50,5 +50,21 @@ export class Alarms extends Construct {
     });
     throttled.addAlarmAction(new cwActions.SnsAction(this.topic));
     throttled.addOkAction(new cwActions.SnsAction(this.topic));
+
+    // One sharp burst fits inside a single period, which the alarm above waits two for: the bell with everyone's last moves.
+    const burst = new cw.Alarm(this, "ArenasThrottleBurst", {
+      alarmName: "boltergeist-arenas-throttle-burst",
+      alarmDescription: "boltergeist-arenas turned away 50 or more requests in five minutes: a burst at its ceiling (infra/lib/tables.ts).",
+      metric: new cw.MathExpression({
+        expression: "reads + writes",
+        usingMetrics: { reads: throttleEvents("ReadThrottleEvents"), writes: throttleEvents("WriteThrottleEvents") },
+        period: Duration.minutes(5),
+      }),
+      comparisonOperator: cw.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      threshold: 50,
+      evaluationPeriods: 1,
+      treatMissingData: cw.TreatMissingData.NOT_BREACHING,
+    });
+    burst.addAlarmAction(new cwActions.SnsAction(this.topic));
   }
 }
