@@ -374,7 +374,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             <>
               <div className="in">
                 <span className={me.call.side === "long" ? "good" : "bad"}>
-                  {me.call.side === "long" ? "▲" : "▼"} {me.call.side} {me.call.power}x
+                  {me.call.side} {me.call.power}x
                 </span>
                 <span className="flag">click {me.call.side === "long" ? "above" : "below"} them for a thundercloud</span>
               </div>
@@ -390,8 +390,8 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             </>
           ) : game.over ? null : (
             <div className="in hints">
-              {trap?.side === "short" ? <span className="flag">click below them for a thundercloud</span> : <span className="good">&#9650; click below them to {trap ? "move your graves" : "go long"}</span>}
-              {trap?.side === "long" ? <span className="flag">click above them for a thundercloud</span> : <span className="bad">&#9660; click above them to {trap ? "move your graves" : "go short"}</span>}
+              {trap?.side === "short" ? <span className="flag">click below them for a thundercloud</span> : <span className="good">click below them to {trap ? "move your graves" : "go long"}</span>}
+              {trap?.side === "long" ? <span className="flag">click above them for a thundercloud</span> : <span className="bad">click above them to {trap ? "move your graves" : "go short"}</span>}
             </div>
           )}
         </div>
