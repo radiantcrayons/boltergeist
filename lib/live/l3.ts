@@ -67,12 +67,23 @@ export function apply(book: Book, u: L3Update): "ok" | "stale" | "rebuild" {
   return "ok";
 }
 
-// Best first: bids high to low, asks low to high.
+// Best first: bids high to low, asks low to high. With a limit well short of the whole side, only the best are kept as it's read,
+// rather than sorting every level.
 export function levels(book: Book, side: L3Side, limit = Infinity): Level[] {
-  return [...book[side]]
-    .sort(([a], [b]) => (side === "buy" ? Number(b) - Number(a) : Number(a) - Number(b)))
-    .slice(0, limit)
-    .map(([at, orders]) => ({ key: at, price: Number(at), size: orders.reduce((sum, o) => sum + o.size, 0), orders }));
+  const level = ([at, orders]: [string, L3Order[]]): Level => ({ key: at, price: Number(at), size: orders.reduce((sum, o) => sum + o.size, 0), orders });
+  const all = book[side];
+  if (!(limit < all.size / 2)) return [...all].sort(([a], [b]) => (side === "buy" ? Number(b) - Number(a) : Number(a) - Number(b))).slice(0, limit).map(level);
+  const better = (a: number, b: number) => (side === "buy" ? a > b : a < b);
+  const best: { p: number; entry: [string, L3Order[]] }[] = [];
+  for (const entry of all) {
+    const p = Number(entry[0]);
+    if (best.length >= limit && !better(p, best[best.length - 1].p)) continue;
+    let i = best.length;
+    while (i > 0 && better(p, best[i - 1].p)) i--;
+    best.splice(i, 0, { p, entry });
+    if (best.length > limit) best.pop();
+  }
+  return best.map((b) => level(b.entry));
 }
 
 // A place in the queue at a price, taken as an order goes in: everything already resting there is ahead of it.

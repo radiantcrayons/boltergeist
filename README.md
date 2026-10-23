@@ -236,8 +236,8 @@ The firewall rate limits the arena's routes and the order book route per address
 | `lib/live/l3.ts`, `lib/live/book.ts`, `app/api/l3/` | Strike's L3 book kept live from a snapshot and every update after it, and your place in its line |
 | `components/Base.tsx`, `components/Arena.tsx` | The start (pick a haunt and a ghost), and a game's screen |
 | `components/Connect.tsx` | Connecting a wallet or an API key |
-| `components/Field.tsx` | The field: the price as frightened kids with a lantern crossing an isometric field at dusk, the weather by round, your ghosts and thundercloud, Strike's biggest orders as zombie hands rising and sinking at each candle, drawn on a canvas |
-| `components/Chart.tsx` | Colours and price steps shared with the field, and a candle chart |
+| `components/Field.tsx` | The field: the price as frightened kids with a lantern crossing an isometric field at dusk in the rain, your ghosts and thundercloud, Strike's biggest orders as zombie hands rising and sinking at each candle, drawn on a canvas |
+| `components/marks.ts` | Colours and price steps shared by the field and the panels |
 | `components/clay.ts`, `components/Spirit.tsx` | The clay kids and the three ghosts, ray cast from rounded parts, and the ghosts' portraits |
 | `components/art/` | The logo and older SVG art |
 

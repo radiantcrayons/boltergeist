@@ -5,8 +5,8 @@ import * as fmt from "@/lib/format";
 import { play } from "@/lib/sfx";
 import type { Role, Side } from "@/lib/game/war";
 import type { Candle } from "@/lib/types";
-import { COLORS, niceStep, type Mark, type Pick, type Pin } from "./Chart";
-import { ANGLES, kidsLantern, paintCloud, paintKids, paintSpook, type Figure, type GhostKind } from "./clay";
+import { COLORS, niceStep, type Mark, type Pick, type Pin } from "./marks";
+import { ANGLES, KIDS_LEAD, kidsLantern, kidsTorch, paintCloud, paintKids, paintSpook, type Figure, type GhostKind } from "./clay";
 import { GHOST_KIND } from "./Spirit";
 import { paintTree } from "./trees";
 
@@ -93,8 +93,39 @@ const TEAMS: Record<Side, { coat: RGB; helmet: RGB; ui: string; dy: number }> = 
 };
 const MUD: RGB = [118, 90, 66];
 const PUDDLE: RGB = [150, 168, 186];
+const PUDDLE_RIM = css(times(MUD, 0.66));
+const PUDDLE_WATER = css(PUDDLE, 0.7);
+const PUDDLE_SHINE = css(pole(PUDDLE, 0.4), 0.6);
+const FOOTPRINT = css(times(MUD, 0.8), 0.6);
+const RAIN = 0.8;
 
-const reduced = () => typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+let motion: MediaQueryList | null = null;
+const reduced = () => {
+  if (!motion && typeof matchMedia !== "undefined") motion = matchMedia("(prefers-reduced-motion: reduce)");
+  return motion?.matches ?? false;
+};
+// The field is drawn at most twice over on a screen with finer pixels than that, one and a half on a narrow one: past that
+// a phone fills pixels nobody can tell apart.
+let DPR = 1;
+const ratioFor = (width: number) => Math.min(typeof devicePixelRatio === "number" && devicePixelRatio > 0 ? devicePixelRatio : 1, width < 600 ? 1.5 : 2);
+let pointer: MediaQueryList | null = null;
+const coarse = () => {
+  if (!pointer && typeof matchMedia !== "undefined") pointer = matchMedia("(pointer: coarse)");
+  return pointer?.matches ?? false;
+};
+// A cache that drops what was used longest ago once it's full.
+function kept<T>(cache: Map<string, T>, key: string, max: number, make: () => T): T {
+  const was = cache.get(key);
+  if (was !== undefined) {
+    cache.delete(key);
+    cache.set(key, was);
+    return was;
+  }
+  const made = make();
+  cache.set(key, made);
+  if (cache.size > max) cache.delete(cache.keys().next().value!);
+  return made;
+}
 const hash = (i: number) => {
   const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
@@ -200,21 +231,17 @@ const ellipsePath = (g: Ctx, x: number, y: number, rx: number, ry: number) => ()
 type Sprite = { c: HTMLCanvasElement; ox: number; oy: number; w: number; h: number };
 const sprites = new Map<string, Sprite>();
 function sprite(key: string, w: number, h: number, ox: number, oy: number, paint: (g: Ctx) => void): Sprite {
-  const dpr = devicePixelRatio || 1;
-  const id = `${key}|${dpr}`;
-  const kept = sprites.get(id);
-  if (kept) return kept;
-  if (sprites.size > 600) sprites.clear();
-  const c = document.createElement("canvas");
-  c.width = Math.max(1, Math.ceil(w * dpr));
-  c.height = Math.max(1, Math.ceil(h * dpr));
-  const g = c.getContext("2d")!;
-  g.scale(dpr, dpr);
-  g.translate(ox, oy);
-  paint(g);
-  const s = { c, ox, oy, w, h };
-  sprites.set(id, s);
-  return s;
+  const dpr = DPR;
+  return kept(sprites, `${key}|${dpr}`, 600, () => {
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.ceil(w * dpr));
+    c.height = Math.max(1, Math.ceil(h * dpr));
+    const g = c.getContext("2d")!;
+    g.scale(dpr, dpr);
+    g.translate(ox, oy);
+    paint(g);
+    return { c, ox, oy, w, h };
+  });
 }
 const blit = (ctx: Ctx, s: Sprite, p: Pt, alpha = 1) => {
   ctx.globalAlpha = alpha;
@@ -222,6 +249,30 @@ const blit = (ctx: Ctx, s: Sprite, p: Pt, alpha = 1) => {
   ctx.globalAlpha = 1;
 };
 const STRIDES = 8;
+
+// A word set once in its face, colour and size and kept as a picture, with where its baseline and start fall in it.
+const GLOW = /^rgba\((\d+, \d+, \d+), ([\d.e-]+)\)$/;
+const words = new Map<string, { c: HTMLCanvasElement; w: number; h: number; asc: number; left: number; width: number }>();
+function wordOf(text: string, font: string, color: string, scale: number) {
+  return kept(words, `${text}|${font}|${color}|${scale}`, 240, () => {
+    const c = document.createElement("canvas");
+    const g = c.getContext("2d")!;
+    g.font = font;
+    const m = g.measureText(text);
+    const asc = Math.ceil(m.actualBoundingBoxAscent) + 2;
+    const left = Math.ceil(m.actualBoundingBoxLeft) + 2;
+    const w = left + Math.ceil(m.actualBoundingBoxRight) + 2;
+    const h = asc + Math.ceil(m.actualBoundingBoxDescent) + 2;
+    c.width = Math.max(1, Math.ceil(w * scale));
+    c.height = Math.max(1, Math.ceil(h * scale));
+    g.scale(c.width / w, c.height / h);
+    g.font = font;
+    g.textBaseline = "alphabetic";
+    g.fillStyle = color;
+    g.fillText(text, left, asc);
+    return { c, w, h, asc, left, width: m.width };
+  });
+}
 
 // Each market's mark, cut out of a disc of warm light: the coin's own silhouette where there is one, its letters where there isn't.
 const SIGNAL = 256;
@@ -321,32 +372,69 @@ function glowing(ctx: Ctx, paths: { pts: Pt[]; w: number }[], size: number, alph
   ctx.restore();
 }
 
-// A soft round shadow or glow on the ground, fading out to its edge.
-function blob(ctx: Ctx, x: number, y: number, rx: number, ry: number, color: RGB, alpha: number) {
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.scale(1, ry / rx);
-  const fall = ctx.createRadialGradient(0, 0, 0, 0, 0, rx);
-  fall.addColorStop(0, css(color, alpha));
-  fall.addColorStop(1, css(color, 0));
-  ctx.fillStyle = fall;
-  ctx.fillRect(-rx, -rx, rx * 2, rx * 2);
-  ctx.restore();
+// A soft round of light or shade, made once for each colour and size and stretched to fit: light fades out to nothing at its
+// edge, shade to its own colour gone clear.
+const halos = new Map<string, HTMLCanvasElement>();
+function halo(rgb: string, r: number, light: boolean) {
+  const size = clamp(2 ** Math.ceil(Math.log2(Math.max(1, r * DPR))), 8, 128);
+  return kept(halos, `${rgb}|${size}|${light ? 1 : 0}`, 160, () => {
+    const c = document.createElement("canvas");
+    c.width = c.height = size * 2;
+    const g = c.getContext("2d")!;
+    const fall = g.createRadialGradient(size, size, 0, size, size, size);
+    fall.addColorStop(0, `rgba(${rgb}, 1)`);
+    fall.addColorStop(1, light ? "rgba(0, 0, 0, 0)" : `rgba(${rgb}, 0)`);
+    g.fillStyle = fall;
+    g.fillRect(0, 0, size * 2, size * 2);
+    return c;
+  });
 }
+const rgbOf = (c: RGB) => `${Math.round(clamp(c[0], 0, 248))}, ${Math.round(clamp(c[1], 0, 248))}, ${Math.round(clamp(c[2], 0, 248))}`;
+type Glow = { p: Pt; r: number; rgb: string; a: number };
+function shine(ctx: Ctx, x: number, y: number, rx: number, ry: number, rgb: string, alpha: number, light: boolean) {
+  if (!(alpha > 0) || !(rx > 0) || !(ry > 0)) return;
+  ctx.globalAlpha = Math.min(1, alpha);
+  ctx.drawImage(halo(rgb, Math.max(rx, ry), light), x - rx, y - ry, rx * 2, ry * 2);
+  ctx.globalAlpha = 1;
+}
+
+// A soft round shadow or glow on the ground, fading out to its edge.
+const blob = (ctx: Ctx, x: number, y: number, rx: number, ry: number, color: RGB, alpha: number) => shine(ctx, x, y, rx, ry, rgbOf(color), alpha, false);
 
 // The clay figures, each look, size and frame made once and kept.
 const figures = new Map<string, Figure>();
-function figure(key: string, make: () => Figure) {
-  const kept = figures.get(key);
-  if (kept) return kept;
-  if (figures.size > 900) figures.clear();
-  const made = make();
-  figures.set(key, made);
-  return made;
-}
+const figure = (key: string, make: () => Figure) => kept(figures, key, 900, make);
 const GHOSTS: Record<Side, RGB> = { long: [214, 240, 228], short: [244, 216, 220] };
 const FIELD_SIZE: Record<GhostKind, number> = { wisp: 0.95, spectre: 1.1, poltergeist: 1.3 };
 const FRAMES = 8;
+// The kids walk a little behind the price, so their torch lights the ground where it is.
+const KIDS_BACK = (KIDS_LEAD * 2.05) / 26;
+// Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
+const WORDS = 1.45;
+
+// A torch's beam: a soft cone of warm light, drawn once and laid from the torch to where it shines.
+let beamCone: HTMLCanvasElement | null = null;
+function beam() {
+  if (beamCone) return beamCone;
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 128;
+  const g = c.getContext("2d")!;
+  g.filter = "blur(5px)";
+  const fall = g.createLinearGradient(8, 0, 244, 0);
+  fall.addColorStop(0, "rgba(255, 240, 200, 0.95)");
+  fall.addColorStop(1, "rgba(255, 214, 150, 0.3)");
+  g.fillStyle = fall;
+  g.beginPath();
+  g.moveTo(8, 60);
+  g.lineTo(236, 18);
+  g.quadraticCurveTo(252, 64, 236, 110);
+  g.lineTo(8, 68);
+  g.closePath();
+  g.fill();
+  beamCone = c;
+  return c;
+}
 const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px));
 const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant));
 const kidsAt = (px: number, stride: number) => figure(`kids|${px}|${stride}`, () => paintKids(px, stride, STRIDES));
@@ -788,6 +876,64 @@ function tuftSprite(A: number, variant: number) {
   });
 }
 
+// What dresses one tile of ground, worked out from where it is alone: whether a grove may stand there, and the tufts, flowers,
+// ferns and stones scattered on it, with what each becomes on open ground and what in a grove.
+type Look = [kind: number, variant: number];
+type Tile = { i: number; j: number; grove: boolean; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
+type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean };
+type Deco = { u: number; w: number; tile: Grove | null; plain: Sprite | null; wild: Sprite | null };
+const LOOKS = [tuftSprite, flowerSprite, fernSprite, cloverSprite, mushroomSprite, pebbleSprite];
+function tileAt(i: number, j: number): Tile {
+  const meadow = clamp((fbm(i / 7 + 11, j / 7 + 5) - 0.35) * 2.4, 0, 1);
+  const flowers = 0.012 + 0.09 * meadow;
+  const ferns = 0.006 + 0.014 * (1 - meadow);
+  const items: Tile["items"] = [];
+  for (let t = 0; t < 5; t++) {
+    const roll = hash(i * 23 + j * 29 + t * 3);
+    const v = Math.floor(hash(i * 7 + j * 3 + t * 11) * 12);
+    const look = (tufts: number): Look | null =>
+      roll < tufts
+        ? [0, v % 6]
+        : roll < 0.13 + flowers
+          ? [1, v]
+          : roll < 0.13 + flowers + ferns
+            ? [2, v]
+            : roll < 0.15 + flowers + ferns
+              ? [3, v]
+              : roll > 0.993 - 0.006 * (1 - meadow)
+                ? [4, v]
+                : roll > 0.982
+                  ? [5, v % 8]
+                  : null;
+    const plain = look(0.13);
+    const wild = look(0.5);
+    if (plain || wild) items.push({ u: i + hash(i * 5 + j * 11 + t), w: j + hash(i * 13 + j * 7 + t), plain, wild });
+  }
+  return { i, j, grove: hash(i * 17 + j * 131) < 0.024, ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
+}
+
+// What throws a long shadow when lightning lights it: where it stands, how high it floats, how far it has risen out of the ground,
+// and the picture its shadow is cut from.
+type Shape = { c: HTMLCanvasElement; ox: number; oy: number; w: number; h: number };
+type Caster = { x: number; y: number; z?: number; tall?: number; shape: () => Shape };
+const shapeOf = (f: Figure, dpr: number): Shape => ({ c: f.canvas, ox: f.ox / dpr, oy: f.oy / dpr, w: f.w / dpr, h: f.h / dpr });
+// Each picture's silhouette, cut once and kept, in the dark of a lightning shadow.
+const silhouettes = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function silhouette(c: HTMLCanvasElement) {
+  const was = silhouettes.get(c);
+  if (was) return was;
+  const s = document.createElement("canvas");
+  s.width = c.width;
+  s.height = c.height;
+  const g = s.getContext("2d")!;
+  g.drawImage(c, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = "rgb(26, 28, 56)";
+  g.fillRect(0, 0, s.width, s.height);
+  silhouettes.set(c, s);
+  return s;
+}
+
 export function Field(props: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -803,7 +949,6 @@ export function Field(props: Props) {
     hands: Map<string, Hand>;
     col: number;
     struck: number;
-    sky: { wet: number; at: number; flash: number; next: number };
     gait: { walked: number; y: number; at: number };
     rain: Float32Array | null;
   }>({
@@ -814,11 +959,19 @@ export function Field(props: Props) {
     hands: new Map(),
     col: 0,
     struck: 0,
-    sky: { wet: 0, at: 0, flash: -1, next: -1 },
     gait: { walked: 0, y: 0, at: 0 },
     rain: null,
   });
-  const grass = useRef<{ c: HTMLCanvasElement | null; x0: number; y0: number; w: number; h: number }>({ c: null, x0: 0, y0: 0, w: 0, h: 0 });
+  const grass = useRef<{ c: HTMLCanvasElement | null; x0: number; y0: number; w: number; h: number; n: number }>({ c: null, x0: 0, y0: 0, w: 0, h: 0, n: 0 });
+  const painting = useRef<{ c: HTMLCanvasElement; x0: number; y0: number; w: number; h: number; img: ImageData; row: number } | null>(null);
+  const tracks = useRef<{ key: string; from: number; ts: number[]; ws: number[] } | null>(null);
+  const tiles = useRef(new Map<string, Tile>());
+  // The far ground fading into the sky along the top, painted once for the canvas's size.
+  const distance = useRef<HTMLCanvasElement | null>(null);
+  const book = useRef<{ walls: Props["walls"] | null; usual: number; lines: { p: number; side: Side; orders: number[] }[] }>({ walls: null, usual: 1, lines: [] });
+  const decor = useRef<{ key: string; groves: Grove[]; low: Deco[] }>({ key: "", groves: [], low: [] });
+  // The grass darkened by the rain, kept for the sheet and how wet it is.
+  const soaked = useRef<{ c: HTMLCanvasElement | null; n: number; level: number }>({ c: null, n: -1, level: -1 });
   const hover = useRef<Pt | null>(null);
   const soft = useRef<HTMLCanvasElement | null>(null);
   // A finger aims by dragging and places on lifting; the click a tap also fires is then passed over.
@@ -853,38 +1006,88 @@ export function Field(props: Props) {
     return priceAt((w - u) / 2) + ground.current.lag;
   }
 
-  // The grass, painted once onto a sheet of ground and moved with the field; painted again when the field walks off it.
+  // The grass, painted once onto a sheet of ground and moved with the field. Before the field walks off it the next sheet is
+  // painted a few rows a frame, so no one frame pays for all of it.
   function grassSheet(nowX: number, cy: number, ext: { x0: number; x1: number; y0: number; y1: number }) {
-    const sheet = grass.current;
     const D = 5;
     const top = cy - R / 2;
-    const inside = sheet.c && nowX + ext.x0 - 2 >= sheet.x0 && nowX + ext.x1 + 2 <= sheet.x0 + sheet.w && top + ext.y0 - 2 >= sheet.y0 && top + ext.y1 + 2 <= sheet.y0 + sheet.h;
-    if (inside) return sheet;
-    const x0 = Math.floor(nowX + ext.x0 - 6);
-    const y0 = Math.floor(top + ext.y0 - 10);
-    const w = Math.ceil(ext.x1 - ext.x0) + 60;
-    const h = Math.ceil(ext.y1 - ext.y0) + 20;
-    const c = sheet.c ?? document.createElement("canvas");
-    c.width = w * D;
-    c.height = h * D;
-    const g = c.getContext("2d")!;
-    const img = g.createImageData(c.width, c.height);
-    for (let v = 0; v < c.height; v++) {
-      for (let u = 0; u < c.width; u++) {
-        const wx = x0 + u / D;
-        const wy = y0 + v / D;
-        const f = (fbm(wx / 2.25, wy / 2.25) - 0.5) * 0.3 + (fbm(wx / 0.56 + 40, wy / 0.56 + 40) - 0.5) * 0.105;
-        const col = pole(CLAY.grass, f);
-        const i = (v * c.width + u) * 4;
-        img.data[i] = col[0];
-        img.data[i + 1] = col[1];
-        img.data[i + 2] = col[2];
-        img.data[i + 3] = 255;
+    const fits = (s: { x0: number; y0: number; w: number; h: number } | null, pad: number) =>
+      !!s && nowX + ext.x0 - pad >= s.x0 && nowX + ext.x1 + pad <= s.x0 + s.w && top + ext.y0 - pad >= s.y0 && top + ext.y1 + pad <= s.y0 + s.h;
+    const sheet = grass.current;
+    const start = () => {
+      const x0 = Math.floor(nowX + ext.x0 - 6);
+      const y0 = Math.floor(top + ext.y0 - 10);
+      const w = Math.ceil(ext.x1 - ext.x0) + 60;
+      const h = Math.ceil(ext.y1 - ext.y0) + 20;
+      const c = document.createElement("canvas");
+      c.width = w * D;
+      c.height = h * D;
+      const img = new ImageData(c.width, c.height);
+      return { c, x0, y0, w, h, img, row: 0 };
+    };
+    const paint = (s: NonNullable<typeof painting.current>, until: number) => {
+      const W = s.c.width;
+      const data = s.img.data;
+      while (s.row < s.c.height && performance.now() < until) {
+        const v = s.row++;
+        const wy = s.y0 + v / D;
+        for (let u = 0; u < W; u++) {
+          const wx = s.x0 + u / D;
+          const f = (fbm(wx / 2.25, wy / 2.25) - 0.5) * 0.3 + (fbm(wx / 0.56 + 40, wy / 0.56 + 40) - 0.5) * 0.105;
+          const col = pole(CLAY.grass, f);
+          const i = (v * W + u) * 4;
+          data[i] = col[0];
+          data[i + 1] = col[1];
+          data[i + 2] = col[2];
+          data[i + 3] = 255;
+        }
+      }
+      return s.row >= s.c.height;
+    };
+    const swap = (s: NonNullable<typeof painting.current>) => {
+      s.c.getContext("2d")!.putImageData(s.img, 0, 0);
+      grass.current = { c: s.c, x0: s.x0, y0: s.y0, w: s.w, h: s.h, n: sheet.n + 1 };
+      painting.current = null;
+      return grass.current;
+    };
+    if (sheet.c && fits(sheet, 2)) {
+      if (!fits(sheet, 6)) {
+        if (!painting.current || !fits(painting.current, 6)) painting.current = start();
+        if (paint(painting.current, performance.now() + 2)) return swap(painting.current);
+      }
+      return sheet;
+    }
+    const next = painting.current && fits(painting.current, 2) ? painting.current : start();
+    paint(next, Infinity);
+    return swap(next);
+  }
+
+  // The ground's dressing for the tiles in view, laid back to front: worked out again only when the view takes in other tiles or
+  // changes scale, each tile's own dressing kept while it stays near the view.
+  function groundFor(i0: number, i1: number, j0: number, j1: number, A: number, dpr: number) {
+    const key = `${i0}|${i1}|${j0}|${j1}|${A}|${dpr}`;
+    if (decor.current.key === key) return decor.current;
+    const known = tiles.current;
+    for (const [id, t] of known) if (t.i < i0 - 4 || t.i > i1 + 4 || t.j < j0 - 4 || t.j > j1 + 4) known.delete(id);
+    const groves: Grove[] = [];
+    const low: Deco[] = [];
+    const art = (l: Look | null) => (l ? LOOKS[l[0]](A, l[1]) : null);
+    for (let i = i0; i <= i1; i++) {
+      for (let j = j0; j <= j1; j++) {
+        const id = `${i},${j}`;
+        let t = known.get(id);
+        if (!t) {
+          t = tileAt(i, j);
+          known.set(id, t);
+        }
+        const grove = t.grove ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false } : null;
+        if (grove) groves.push(grove);
+        for (const it of t.items) low.push({ u: it.u, w: it.w, tile: grove, plain: art(it.plain), wild: art(it.wild) });
       }
     }
-    g.putImageData(img, 0, 0);
-    grass.current = { c, x0, y0, w, h };
-    return grass.current;
+    low.sort((p, q) => p.u + p.w - (q.u + q.w));
+    decor.current = { key, groves, low };
+    return decor.current;
   }
 
   function draw() {
@@ -897,24 +1100,24 @@ export function Field(props: Props) {
     const scale = FIELD_SIZE[kind];
     const v = view.current;
     const g = ground.current;
-    const dpr = devicePixelRatio || 1;
+    const dpr = DPR;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const sky = ctx.createLinearGradient(0, 0, 0, v.h);
-    sky.addColorStop(0, css(CLAY.skyTop));
-    sky.addColorStop(0.62, css(mix(CLAY.skyTop, CLAY.haze, 0.75)));
-    sky.addColorStop(1, css(CLAY.haze));
-    ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, v.w, v.h);
-    const glow = ctx.createRadialGradient(v.w / 2, v.h / 2, 0, v.w / 2, v.h / 2, Math.max(v.w, v.h) * 0.75);
-    glow.addColorStop(0, css(CLAY.glow, 0.55));
-    glow.addColorStop(1, css(CLAY.glow, 0));
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, v.w, v.h);
 
     const last = candles.at(-1);
     const target = mark ?? last?.c;
+    // The sky only shows until there's a price: then the ground covers the whole view.
     if (target === undefined || !last) {
+      const sky = ctx.createLinearGradient(0, 0, 0, v.h);
+      sky.addColorStop(0, css(CLAY.skyTop));
+      sky.addColorStop(0.62, css(mix(CLAY.skyTop, CLAY.haze, 0.75)));
+      sky.addColorStop(1, css(CLAY.haze));
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, v.w, v.h);
+      const glow = ctx.createRadialGradient(v.w / 2, v.h / 2, 0, v.w / 2, v.h / 2, Math.max(v.w, v.h) * 0.75);
+      glow.addColorStop(0, css(CLAY.glow, 0.55));
+      glow.addColorStop(1, css(CLAY.glow, 0));
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, v.w, v.h);
       ctx.fillStyle = "#3b4652";
       ctx.font = `13px ${DISPLAY}`;
       ctx.fillText("WAITING FOR THE PRICE...", 16, v.h / 2);
@@ -998,33 +1201,64 @@ export function Field(props: Props) {
     m.call = yours.call ?? null;
     m.flag = yours.flag?.price ?? null;
     m.past = m.past.filter((p) => X(p.at) > -P - 2);
-    // Fair weather until your graves spring; then rain sets in while you're in, and the only lightning is your thundercloud's.
-    const storm = yours.call ? 0.8 : 0;
-    m.sky.wet += (storm - m.sky.wet) * (1 - Math.exp(-Math.min(at - m.sky.at, 100) / 2500));
-    m.sky.at = at;
-    const wet = reduced() ? 0 : m.sky.wet;
+    // It rains the whole night through, and the only lightning is your thundercloud's.
+    const wet = reduced() ? 0 : RAIN;
     for (const key of m.summoned.keys()) if (key !== m.flag) m.summoned.delete(key);
 
     // The ground: one sheet of clay grass, moved with the field.
     const sheet = grassSheet(nowX, g.cy, ext);
     const D = 5;
+    // In the rain the grass darkens: the sheet is darkened once for each step of wetness rather than the whole view every frame.
+    let lawn = sheet.c!;
+    if (wet > 0.01) {
+      const level = Math.max(1, Math.round(wet * 64));
+      const s = soaked.current;
+      if (!s.c || s.n !== sheet.n || s.level !== level) {
+        const c2 = s.c ?? document.createElement("canvas");
+        if (c2.width !== lawn.width || c2.height !== lawn.height) {
+          c2.width = lawn.width;
+          c2.height = lawn.height;
+        }
+        const gs = c2.getContext("2d")!;
+        gs.globalCompositeOperation = "copy";
+        gs.drawImage(lawn, 0, 0);
+        gs.globalCompositeOperation = "source-over";
+        gs.fillStyle = `rgba(46, 58, 84, ${(0.2 * level) / 64})`;
+        gs.fillRect(0, 0, c2.width, c2.height);
+        soaked.current = { c: c2, n: sheet.n, level };
+      }
+      lawn = soaked.current.c!;
+    }
     ctx.save();
     const ex = v.OX + (sheet.x0 - nowX - sheet.y0 + g.cy - R / 2) * A;
     const ey = v.OY + ((sheet.x0 - nowX + sheet.y0 - g.cy + R / 2) * A) / 2;
     ctx.setTransform((dpr * A) / D, (dpr * A) / (2 * D), (-dpr * A) / D, (dpr * A) / (2 * D), dpr * ex, dpr * ey);
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(sheet.c!, 0, 0);
+    ctx.drawImage(lawn, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    if (wet > 0.01) {
-      ctx.fillStyle = `rgba(46, 58, 84, ${0.2 * wet})`;
-      ctx.fillRect(0, 0, v.w, v.h);
-    }
 
     // The trail: everywhere they've been, trodden into a muddy path that is the chart, with puddles in it and footprints along it.
     const stepT = intervalMs / 16;
+    const from = Math.ceil(Math.max(first, now + (ext.x0 - 1) * intervalMs) / stepT) * stepT;
+    // Where they were through the candles already closed doesn't change, so it's kept until the next candle opens.
+    const open = last.t;
+    const tk = `${intervalMs}|${g.rowSize}|${g.ref}|${first}|${open}|${candles.length}`;
+    let tr = tracks.current;
+    if (!tr || tr.key !== tk || tr.from > from) {
+      const ts: number[] = [];
+      const ws: number[] = [];
+      for (let t = from; t < open; t += stepT) {
+        const p = where(t);
+        if (p !== null) {
+          ts.push(t);
+          ws.push(worldY(p));
+        }
+      }
+      tr = tracks.current = { key: tk, from, ts, ws };
+    }
     const trail: { t: number; q: Pt }[] = [];
-    for (let t = Math.ceil(Math.max(first, now + (ext.x0 - 1) * intervalMs) / stepT) * stepT; t < now; t += stepT) {
+    for (let n = 0; n < tr.ts.length; n++) if (tr.ts[n] >= from - stepT * 0.5) trail.push({ t: tr.ts[n], q: S(X(tr.ts[n]), tr.ws[n] - g.cy + R / 2) });
+    for (let t = trail.length ? trail[trail.length - 1].t + stepT : from; t < now; t += stepT) {
       const p = where(t);
       if (p !== null) trail.push({ t, q: S(X(t), yOf(p)) });
     }
@@ -1045,21 +1279,36 @@ export function Field(props: Props) {
       ctx.strokeStyle = color;
       ctx.stroke();
     }
+    // Footprints in one stroke of the brush between puddles, so each puddle still lies over the prints before it and under those after.
+    let prints = 0;
+    const stamp = () => {
+      if (!prints) return;
+      ctx.fillStyle = FOOTPRINT;
+      ctx.fill();
+      prints = 0;
+    };
     for (let n = 0; n < trail.length - 1; n++) {
       const { t, q } = trail[n];
       const step = Math.round(t / stepT);
       const h = hash(step * 3.7);
       if (h < 0.035 + 0.08 * wet) {
+        stamp();
         const r = (0.07 + hash(step) * 0.08) * A;
         const lean = (hash(step * 1.9) - 0.5) * 0.12 * A;
-        oval(ctx, q.x + lean, q.y + 0.02 * A, r * 2, r * 0.8, css(times(MUD, 0.66)));
-        oval(ctx, q.x + lean - r * 0.35, q.y + 0.01 * A, r * 1.25, r * 0.42, css(PUDDLE, 0.7));
-        oval(ctx, q.x + lean - r * 0.6, q.y, r * 0.4, r * 0.12, css(pole(PUDDLE, 0.4), 0.6));
+        oval(ctx, q.x + lean, q.y + 0.02 * A, r * 2, r * 0.8, PUDDLE_RIM);
+        oval(ctx, q.x + lean - r * 0.35, q.y + 0.01 * A, r * 1.25, r * 0.42, PUDDLE_WATER);
+        oval(ctx, q.x + lean - r * 0.6, q.y, r * 0.4, r * 0.12, PUDDLE_SHINE);
       } else if (step % 2 === 0) {
         const side = step % 4 ? 1 : -1;
-        oval(ctx, q.x + side * 0.05 * A, q.y + side * 0.025 * A, 0.045 * A, 0.022 * A, css(times(MUD, 0.8), 0.6));
+        const x = q.x + side * 0.05 * A;
+        const y = q.y + side * 0.025 * A;
+        if (!prints) ctx.beginPath();
+        ctx.moveTo(x + 0.045 * A, y);
+        ctx.ellipse(x, y, 0.045 * A, 0.022 * A, 0, 0, Math.PI * 2);
+        prints++;
       }
     }
+    stamp();
 
     // The day's lines on the ground: the fight's start, each new round, the final bell.
     for (const [t, color] of [[span.from, COLORS.volt], ...rounds.map((r) => [r.at, "#f8a23a"] as const), [span.to, COLORS.volt]] as const) {
@@ -1093,10 +1342,10 @@ export function Field(props: Props) {
     const stood: { d: number; draw: () => void }[] = [];
     const put = (x: number, y: number, fn: () => void) => stood.push({ d: x + y, draw: fn });
     const shadows: (() => void)[] = [];
-    const lights: { p: Pt; r: number; color: string }[] = [];
-    // What stands tall enough to throw a long shadow when lightning lights it, where lightning is lighting the field this moment, and
-    // how much the sun's soft shadows give way to it.
-    const casters: { x: number; y: number; h: number; w: number }[] = [];
+    const lights: Glow[] = [];
+    // What stands tall enough to throw a long shadow when lightning lights it, with the picture of it the shadow is cut from, where
+    // lightning is lighting the field this moment, and how much the sun's soft shadows give way to it.
+    const casters: Caster[] = [];
     const glare: { x: number; y: number }[] = [];
     let sun = 1;
     const i0 = Math.floor(nowX + ext.x0) - 1;
@@ -1110,71 +1359,53 @@ export function Field(props: Props) {
       const p = where(now + x * intervalMs);
       return p !== null && Math.abs(yOf(p) - y) < 0.24;
     };
-    const low: { d: number; draw: () => void }[] = [];
-    for (let i = i0; i <= i1; i++) {
-      for (let j = j0; j <= j1; j++) {
-        const n = hash(i * 17 + j * 131);
-        const x = i - nowX + hash(i + j) * 0.7;
-        const y = j + 0.5 - g.cy + R / 2;
-        if (!seen(S(x, y), 80)) continue;
-        // Meadows are thick with flowers, the wilder ground with ferns and toadstools.
-        const meadow = clamp((fbm(i / 7 + 11, j / 7 + 5) - 0.35) * 2.4, 0, 1);
-        const grove = n < 0.024 && seen(S(x, y), 10) && clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y);
-        // Whatever the kids walk through goes faint, so they're never lost behind it.
-        const faint = clamp((Math.hypot(x, y - y0) - 0.5) / 0.9, 0.3, 1);
-        if (grove) {
-          const pick = hash(i * 3 + j);
-          const variant = Math.floor(hash(i * 5 + j * 3) * 12);
-          if (pick < 0.62) {
-            const size = variant === 10 ? 0.7 : variant % 3 === 0 ? 1.15 : 1;
-            shadows.push(() => {
-              const p = S(x, y);
-              blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * sun);
-            });
-            casters.push({ x, y, h: 1.9 * A * size, w: 0.7 * A * size });
-            put(x, y, () => {
-              const f = treeAt(Math.round((A / 28) * (variant % 3 === 0 ? 1.15 : 1) * dpr * 10) / 10, variant);
-              const p = S(x, y);
-              ctx.globalAlpha = faint;
-              ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
-              ctx.globalAlpha = 1;
-            });
-          } else if (pick < 0.74) {
-            shadows.push(() => {
-              const p = S(x, y);
-              blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * sun);
-            });
-            casters.push({ x, y, h: 1.5 * A, w: 0.35 * A });
-            put(x, y, () => blit(ctx, deadSprite(A, variant), S(x, y), faint));
-          } else if (pick < 0.83) put(x, y, () => blit(ctx, stumpSprite(A, variant), S(x, y), faint));
-          else if (pick < 0.92) {
-            put(x, y, () => blit(ctx, pumpkinSprite(A, variant), S(x, y), faint));
-            if (variant % 3 === 0) lights.push({ p: S(x, y, 0.12 * A), r: 0.55 * A, color: "rgba(255, 170, 80, 0.45)" });
-          } else put(x, y, () => blit(ctx, boulderSprite(A, variant), S(x, y), faint));
-        }
-        for (let t = 0; t < 5; t++) {
-          const tx = i - nowX + hash(i * 5 + j * 11 + t);
-          const ty = j + hash(i * 13 + j * 7 + t) - g.cy + R / 2;
-          const q = S(tx, ty);
-          if (!seen(q, 20)) continue;
-          const roll = hash(i * 23 + j * 29 + t * 3);
-          const v = Math.floor(hash(i * 7 + j * 3 + t * 11) * 12);
-          let paint: Sprite | null = null;
-          const flowers = 0.012 + 0.09 * meadow;
-          const ferns = 0.006 + 0.014 * (1 - meadow);
-          if (roll < (grove ? 0.5 : 0.13)) paint = tuftSprite(A, v % 6);
-          else if (roll < 0.13 + flowers) paint = flowerSprite(A, v);
-          else if (roll < 0.13 + flowers + ferns) paint = fernSprite(A, v);
-          else if (roll < 0.15 + flowers + ferns) paint = cloverSprite(A, v);
-          else if (roll > 0.993 - 0.006 * (1 - meadow)) paint = mushroomSprite(A, v);
-          else if (roll > 0.982) paint = pebbleSprite(A, v % 8);
-          if (!paint || bare(tx, ty)) continue;
-          const sp = paint;
-          low.push({ d: tx + ty, draw: () => blit(ctx, sp, q) });
-        }
-      }
+    const dec = groundFor(i0, i1, j0, j1, A, dpr);
+    for (const tile of dec.groves) {
+      tile.on = false;
+      const x = tile.i - nowX + tile.ox;
+      const y = tile.j + 0.5 - g.cy + R / 2;
+      if (!seen(S(x, y), 10) || !clear.every((yc) => Math.abs(yc - y) > 1) || bare(x, y)) continue;
+      tile.on = true;
+      // Whatever the kids walk through goes faint, so they're never lost behind it.
+      const faint = clamp((Math.hypot(x, y - y0) - 0.5) / 0.9, 0.3, 1);
+      const { pick, variant } = tile;
+      if (pick < 0.62) {
+        const size = variant === 10 ? 0.7 : variant % 3 === 0 ? 1.15 : 1;
+        const f = treeAt(Math.round((A / 28) * (variant % 3 === 0 ? 1.15 : 1) * dpr * 10) / 10, variant);
+        shadows.push(() => {
+          const p = S(x, y);
+          blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * sun);
+        });
+        casters.push({ x, y, shape: () => shapeOf(f, dpr) });
+        put(x, y, () => {
+          const p = S(x, y);
+          ctx.globalAlpha = faint;
+          ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
+          ctx.globalAlpha = 1;
+        });
+      } else if (pick < 0.74) {
+        const sp = deadSprite(A, variant);
+        shadows.push(() => {
+          const p = S(x, y);
+          blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * sun);
+        });
+        casters.push({ x, y, shape: () => sp });
+        put(x, y, () => blit(ctx, sp, S(x, y), faint));
+      } else if (pick < 0.83) put(x, y, () => blit(ctx, stumpSprite(A, variant), S(x, y), faint));
+      else if (pick < 0.92) {
+        put(x, y, () => blit(ctx, pumpkinSprite(A, variant), S(x, y), faint));
+        if (variant % 3 === 0) lights.push({ p: S(x, y, 0.12 * A), r: 0.55 * A, rgb: "255, 170, 80", a: 0.45 });
+      } else put(x, y, () => blit(ctx, boulderSprite(A, variant), S(x, y), faint));
     }
-    low.sort((p, q) => p.d - q.d).forEach((l) => l.draw());
+    for (const l of dec.low) {
+      const tx = l.u - nowX;
+      const ty = l.w - g.cy + R / 2;
+      const q = S(tx, ty);
+      if (!seen(q, 20)) continue;
+      const sp = l.tile?.on ? l.wild : l.plain;
+      if (!sp || bare(tx, ty)) continue;
+      blit(ctx, sp, q);
+    }
     // The future is haze: nobody knows where they'll walk.
     poly(ctx, [S(0.5, ext.y0), S(ext.x1 + 1, ext.y0), S(ext.x1 + 1, ext.y1), S(0.5, ext.y1)], css(CLAY.haze, 0.22));
 
@@ -1194,14 +1425,19 @@ export function Field(props: Props) {
       ctx.globalAlpha = 1;
     };
     const bolts: (() => void)[] = [];
-    const flashes: { p: Pt; r: number; color: string }[] = [];
+    const flashes: Glow[] = [];
+    // Clouds going as they strike the kids for the last time.
+    const fading: { x: number; y: number; alpha: number }[] = [];
     if (yf !== null && yours.flag) {
-      const from = m.summoned.get(yours.flag.price) ?? now;
-      const seed = from % 997;
+      // A cloud waits in silence while your graves do: it strikes only once your ghosts are up and you're in.
+      const summoned = m.summoned.get(yours.flag.price) ?? now;
+      const call = yours.call;
+      const from = call ? Math.max(summoned, call.at + (call.maker ? 1800 : 1600)) : Infinity;
+      const seed = summoned % 997;
       const strikeX = (j: number) => (from + j * STRIKE_MS) / intervalMs - nowX + cloudX + (hash(j * 7.1 + seed) - 0.5) * 1.4;
       line(ctx, S(0.3, yf), S(ext.x1, yf), css(CLAY.yellow, 0.85), 2, [4, 6]);
-      const j1 = Math.floor((now - from) / STRIKE_MS);
-      if (from + j1 * STRIKE_MS > m.struck && !reduced()) {
+      const j1 = from === Infinity ? -1 : Math.floor((now - from) / STRIKE_MS);
+      if (j1 >= 0 && from + j1 * STRIKE_MS > m.struck && !reduced()) {
         m.struck = from + j1 * STRIKE_MS;
         play("strike");
       }
@@ -1212,7 +1448,7 @@ export function Field(props: Props) {
         const left = clamp(1 - age / (STRIKE_MS * 18), 0, 1);
         const q = S(x, yf);
         blit(ctx, scorchSprite(A, j + seed), q, 0.9 * left);
-        if (age < 600) lights.push({ p: q, r: 0.3 * A, color: `rgba(255, 170, 80, ${0.5 * (1 - age / 600)})` });
+        if (age < 600) lights.push({ p: q, r: 0.3 * A, rgb: "255, 170, 80", a: 0.5 * (1 - age / 600) });
         if (age > 260 || reduced()) continue;
         // The stroke flickers: lit, dark a moment, lit again.
         const on = age < 90 || (age > 130 && age < 240);
@@ -1221,25 +1457,27 @@ export function Field(props: Props) {
         glare.push({ x, y: yf });
         const sky = { x: cloudX + (x - cloudX) * 0.35, y: yf, z: CLOUD_Z / A - 0.1 };
         bolts.push(() => lightning3d(ctx, sky, { x, y: yf, z: 0 }, j * 13 + seed, A / 34, (pt) => S(pt.x, pt.y, pt.z * A)));
-        flashes.push({ p: q, r: 1.1 * A, color: "rgba(255, 232, 140, 0.55)" }, { p: { x: top.x, y: top.y - 0.3 * A }, r: 1.3 * A, color: "rgba(200, 210, 255, 0.4)" });
+        flashes.push({ p: q, r: 1.1 * A, rgb: "255, 232, 140", a: 0.55 }, { p: { x: top.x, y: top.y - 0.3 * A }, r: 1.3 * A, rgb: "200, 210, 255", a: 0.4 });
       }
       shadows.push(() => {
         const p = S(cloudX + 0.35, yf - 0.25);
         blob(ctx, p.x, p.y, 2.1 * A, 0.95 * A, [118, 124, 160], 0.6 * sun);
       });
     }
-    // Lightning comes down on the kids where they walked into your cloud.
+    // Lightning comes down on the kids where they walked into your cloud: its last strike, from the cloud itself, which then goes.
     for (const p of m.past) {
       if (p.kind !== "taken" || now - p.at > 1100) continue;
       const t = (now - p.at) / 1100;
-      const q = S(X(p.at), yOf(p.price));
+      const kx = X(p.at);
+      const ky = yOf(p.price);
+      const q = S(kx, ky);
+      const cx = kx + cloudAt(ky);
+      fading.push({ x: cx, y: ky, alpha: 1 - t });
       if (t < 0.4 && !reduced()) {
-        glare.push({ x: X(p.at), y: yOf(p.price) });
-        const kx = X(p.at);
-        const ky = yOf(p.price);
-        bolts.push(() => lightning3d(ctx, { x: kx + 0.3, y: ky - 0.3, z: CLOUD_Z / A + 0.4 }, { x: kx, y: ky, z: 0 }, Math.round(p.at), A / 22, (pt) => S(pt.x, pt.y, pt.z * A)));
+        glare.push({ x: kx, y: ky });
+        bolts.push(() => lightning3d(ctx, { x: cx + (kx - cx) * 0.35, y: ky, z: CLOUD_Z / A - 0.1 }, { x: kx, y: ky, z: 0 }, Math.round(p.at), A / 22, (pt) => S(pt.x, pt.y, pt.z * A)));
       }
-      flashes.push({ p: q, r: (1.2 + 2 * t) * A, color: `rgba(255, 232, 140, ${0.8 * (1 - t)})` });
+      flashes.push({ p: q, r: (1.2 + 2 * t) * A, rgb: "255, 232, 140", a: 0.8 * (1 - t) });
       bolts.push(() => {
         for (const r of [0.5, 1]) oval(ctx, q.x, q.y, (0.4 + 1.6 * t * r) * A, (0.2 + 0.8 * t * r) * A, undefined, `rgba(255, 236, 120, ${1 - t})`, 2);
       });
@@ -1257,17 +1495,30 @@ export function Field(props: Props) {
       m.col = col;
     }
     if (walls.length) {
-      const all = walls.flatMap((w) => w.orders).sort((a, b) => a - b);
-      const usual = all[Math.floor(all.length / 2)] || 1;
+      // The book only changes a few times a second: its usual order and each line's orders biggest first are worked out then.
+      let bk = book.current;
+      if (bk.walls !== walls) {
+        const all = walls.flatMap((w) => w.orders).sort((a, b) => a - b);
+        bk = book.current = { walls, usual: all[Math.floor(all.length / 2)] || 1, lines: walls.map((w) => ({ p: w.p, side: w.side, orders: [...w.orders].sort((a, b) => b - a) })) };
+      }
+      const usual = bk.usual;
       const cx = col + 0.5 - nowX;
+      const most = v.w < 600 ? 4 : 7;
+      // Only the biggest few orders in view are ever shown, so only those are kept, biggest first.
+      const keep = most + 3;
       const orders: { key: string; row: number; side: Side; usd: number; seed: number }[] = [];
-      for (const w of walls) {
+      for (const w of bk.lines) {
         const row = Math.round(worldY(w.p) * 2) / 2;
         if (!seen(S(cx, row - g.cy + R / 2), -30)) continue;
-        [...w.orders].sort((a, b) => b - a).forEach((usd, k) => orders.push({ key: `${col}|${w.p}|${k}`, row, side: w.side, usd, seed: hash(col * 7919 + row * 62 + k * 13) }));
+        for (let k = 0; k < w.orders.length; k++) {
+          const usd = w.orders[k];
+          if (orders.length === keep && usd <= orders[keep - 1].usd) break;
+          let at0 = orders.length;
+          while (at0 > 0 && orders[at0 - 1].usd < usd) at0--;
+          orders.splice(at0, 0, { key: `${col}|${w.p}|${k}`, row, side: w.side, usd, seed: hash(col * 7919 + row * 62 + k * 13) });
+          if (orders.length > keep) orders.pop();
+        }
       }
-      orders.sort((a, b) => b.usd - a.usd);
-      const most = v.w < 600 ? 4 : 7;
       const shown = new Set<string>();
       orders.forEach((o, rank) => {
         const h = m.hands.get(o.key);
@@ -1311,6 +1562,8 @@ export function Field(props: Props) {
       if (!seen(S(x, y))) continue;
       const tint = TEAMS[h.side].coat;
       const wide = h.head ? 1.7 : 1;
+      const arm = armSprite(A, tint, h.reach, Math.floor(h.seed * 6));
+      casters.push({ x, y, tall: e, shape: () => arm });
       put(x, y, () => {
         const p = S(x, y);
         blit(ctx, moundSprite(A, false, wide), p, fade * Math.min(1, e * 2.5));
@@ -1319,28 +1572,31 @@ export function Field(props: Props) {
           const bob = calm ? 0 : Math.sin(at / 700 + h.seed * 20) * 0.6 * k;
           const q = { x: p.x - 5.5 * k, y: p.y + 1.5 * k + bob };
           risen(headSprite(A, tint, Math.floor(h.seed * 40)), q, eh, fade, 1.4 * k);
-          if (eh > 0.6) glows.push({ p: { x: q.x, y: q.y - 7.4 * k }, r: 0.4 * A, color: `rgba(252, 226, 120, ${0.38 * fade})` });
+          if (eh > 0.6) glows.push({ p: { x: q.x, y: q.y - 7.4 * k }, r: 0.4 * A, rgb: "252, 226, 120", a: 0.38 * fade });
         }
-        risen(armSprite(A, tint, h.reach, Math.floor(h.seed * 6)), { x: p.x + (h.head ? 4 * k : 0), y: p.y }, e, fade, 1.4 * k);
+        risen(arm, { x: p.x + (h.head ? 4 * k : 0), y: p.y }, e, fade, 1.4 * k);
         blit(ctx, moundSprite(A, true, wide), p, fade * Math.min(1, e * 2.5));
       });
     }
 
     // A ghost floats a little above the ground, bobbing; its glow goes in with the dusk.
-    const glows: { p: Pt; r: number; color: string }[] = [...lights];
-    const spook = (x: number, y: number, side: Side, s: number, phase: number, alpha: number, boo: boolean, lift = 0, turn = 0) => {
+    const glows: Glow[] = [...lights];
+    // A ghost's figure is made at size made and drawn at size s; rising, its frame is held so the few figures it needs are kept.
+    const spook = (x: number, y: number, side: Side, s: number, phase: number, alpha: number, boo: boolean, lift = 0, turn = 0, made = s, frame?: number) => {
+      const z = (6 + Math.sin(phase) * 2.5) * s * k + lift;
+      const f = ghostAt(kind, GHOSTS[side], Math.round(1.9 * made * k * dpr * 10) / 10, frame ?? Math.floor((((phase / (Math.PI * 2)) % 1) + 1) % 1 * FRAMES), boo, turn);
+      const st = s / made / dpr;
       shadows.push(() => {
         const p = S(x, y);
         blob(ctx, p.x, p.y, 0.5 * s * A, 0.24 * s * A, [92, 108, 136], 0.5 * sun * clamp(1 - lift / (1.5 * A), 0.2, 1));
       });
-      casters.push({ x, y, h: 1.3 * s * A, w: 0.6 * s * A });
+      casters.push({ x, y, z, shape: () => ({ c: f.canvas, ox: f.ox * st, oy: f.oy * st, w: f.w * st, h: f.h * st }) });
       put(x, y, () => {
-        const p = S(x, y, (6 + Math.sin(phase) * 2.5) * s * k + lift);
-        const f = ghostAt(kind, GHOSTS[side], Math.round(1.9 * s * k * dpr * 10) / 10, Math.floor((((phase / (Math.PI * 2)) % 1) + 1) % 1 * FRAMES), boo, turn);
+        const p = S(x, y, z);
         ctx.globalAlpha = alpha;
-        ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
+        ctx.drawImage(f.canvas, p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
         ctx.globalAlpha = 1;
-        glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, color: side === "long" ? "rgba(170, 240, 210, 0.32)" : "rgba(250, 190, 205, 0.32)" });
+        glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, rgb: side === "long" ? "170, 240, 210" : "250, 190, 205", a: 0.32 });
       });
     };
     // A row of your ghosts on a line just ahead of the kids, keeping pace with them: as many as your power calls for, as big as your
@@ -1367,7 +1623,8 @@ export function Field(props: Props) {
         if (e < 0.02) continue;
         const y = ya + (hash(i * 3.7) - 0.5) * 0.14 + (tight ? (i % 2 ? 0.26 : -0.26) : 0);
         const v = Math.floor(hash(i * 5.3) * 4);
-        casters.push({ x, y, h: 0.8 * A * scale * e, w: 0.55 * A * scale });
+        const stone = graveSprite(A, side, v, scale * 1.5);
+        casters.push({ x, y, tall: ease(e), shape: () => stone });
         shadows.push(() => {
           const p = S(x, y);
           blob(ctx, p.x + 0.14 * A, p.y - 0.06 * A, 0.34 * A * scale, 0.15 * A * scale, [110, 118, 150], 0.5 * e * sun);
@@ -1375,9 +1632,9 @@ export function Field(props: Props) {
         put(x, y, () => {
           const p = S(x, y);
           blit(ctx, moundSprite(A, false, scale * 1.3), p, Math.min(1, e * 2));
-          risen(graveSprite(A, side, v, scale * 1.5), p, ease(e), 1, 0.05 * A);
+          risen(stone, p, ease(e), 1, 0.05 * A);
           blit(ctx, moundSprite(A, true, scale * 1.3), p, Math.min(1, e * 2));
-          if (e > 0.5) glows.push({ p: { x: p.x, y: p.y - 0.45 * A * scale }, r: 0.5 * A * scale, color: side === "long" ? `rgba(130, 240, 190, ${0.45 * e})` : `rgba(250, 150, 170, ${0.45 * e})` });
+          if (e > 0.5) glows.push({ p: { x: p.x, y: p.y - 0.45 * A * scale }, r: 0.5 * A * scale, rgb: side === "long" ? "130, 240, 190" : "250, 150, 170", a: 0.45 * e });
         });
       }
     };
@@ -1386,13 +1643,25 @@ export function Field(props: Props) {
     // up a line of time, its foot at (x, y) and about size tiles tall. Drawn last, so nothing stands in front of it.
     const labels: (() => void)[] = [];
     const marking = (text: string, x: number, y: number, size: number, color: string, o: { align?: CanvasTextAlign; up?: boolean; halo?: boolean; glow?: boolean; weight?: number } = {}) => {
-      const f = (A * size) / 26;
+      const f = (A * size * WORDS * (v.w < 600 ? 1.06 : 1)) / 26;
       const at0 = S(x, y);
       ctx.save();
       if (o.up) ctx.setTransform(dpr * f, (-dpr * f) / 2, dpr * f, (dpr * f) / 2, dpr * at0.x, dpr * at0.y);
       else ctx.setTransform(dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2, dpr * at0.x, dpr * at0.y);
       if (o.glow) ctx.globalCompositeOperation = "lighter";
-      ctx.font = `${o.weight ?? 700} 26px ${o.weight === 400 ? DISPLAY : MONO}`;
+      const font = `${o.weight ?? 700} 26px ${o.weight === 400 ? DISPLAY : MONO}`;
+      // The many faint numbers along the rows are set once each and laid down as pictures, once the face they're set in has loaded.
+      const glowing = o.glow && GLOW.test(color) && typeof document !== "undefined" && document.fonts?.status === "loaded";
+      if (glowing) {
+        const [, rgb, alpha] = GLOW.exec(color)!;
+        const wd = wordOf(text, font, `rgb(${rgb})`, f * dpr * 1.12);
+        const shift = o.align === "center" ? -wd.width / 2 : o.align === "right" || o.align === "end" ? -wd.width : 0;
+        ctx.globalAlpha = Number(alpha);
+        ctx.drawImage(wd.c, shift - wd.left, -wd.asc, wd.w, wd.h);
+        ctx.restore();
+        return;
+      }
+      ctx.font = font;
       ctx.textAlign = o.align ?? "left";
       ctx.textBaseline = "alphabetic";
       if (o.halo !== false && !o.glow) {
@@ -1405,6 +1674,18 @@ export function Field(props: Props) {
       ctx.fillText(text, 0, 0);
       ctx.restore();
     };
+    // Rising, each ghost spins once round on its own, showing itself from every side, then turns to face the kids. It's drawn from
+    // its full size figure at every turn, made ahead a few a frame while the graves wait, so the swirl never stops to make them.
+    const kx = -KIDS_BACK;
+    const facing = (x: number, y: number) => {
+      const a = Math.atan2(y0 - y, kx - x) - Math.PI / 4;
+      return ((Math.round((a / (Math.PI * 2)) * ANGLES) % ANGLES) + ANGLES) % ANGLES;
+    };
+    if (yours.trap && !yours.call && !reduced()) {
+      const until = performance.now() + 2;
+      const body = GHOSTS[yours.trap.side];
+      for (let t = 0; t < ANGLES && performance.now() < until; t++) ghostAt(kind, body, Math.round(1.9 * scale * k * dpr * 10) / 10, 0, true, t);
+    }
     if (yours.trap && !yours.call) {
       const ya = yOf(yours.trap.price);
       if (onMap(ya)) {
@@ -1437,16 +1718,21 @@ export function Field(props: Props) {
           if (rise < 1) {
             const at0 = swirl(x, j, rise);
             at0.y += dy * rise;
-            spook(at0.x, at0.y, call.side, Math.round(scale * (0.4 + 0.6 * ease(rise)) * 10) / 10, at0.turn, Math.min(1, rise * 3) * 0.95, true, at0.lift, Math.floor(ANGLES * 3 * ease(rise)) % ANGLES);
+            const grow = 0.4 + 0.6 * ease(rise);
+            const begin = (j / Math.max(1, call.count - 1)) * 0.3;
+            const spun = Math.floor(ANGLES * ease(clamp((rise - begin) / 0.6, 0, 1)));
+            spook(at0.x, at0.y, call.side, Math.round(scale * grow * 10) / 10, at0.turn, Math.min(1, rise * 3) * 0.95, true, at0.lift, (facing(x, ya + dy) + spun) % ANGLES, scale, 0);
             for (let tr = 1; tr <= 5; tr++) {
               const back = swirl(x, j, Math.max(0, rise - tr * 0.035));
               back.y += dy * rise;
-              glows.push({ p: S(back.x, back.y, back.lift + 0.5 * A * scale), r: 0.14 * A, color: call.side === "long" ? `rgba(150, 255, 210, ${0.7 * (1 - tr / 6)})` : `rgba(255, 170, 190, ${0.7 * (1 - tr / 6)})` });
+              glows.push({ p: S(back.x, back.y, back.lift + 0.5 * A * scale), r: 0.14 * A, rgb: call.side === "long" ? "150, 255, 210" : "255, 170, 190", a: 0.7 * (1 - tr / 6) });
             }
             return;
           }
           const from = call.maker ? { x, y: ya + dy } : { x: x + 1.6, y: call.side === "long" ? R + 1 : -1 };
-          spook(lerp(from.x, x, go), lerp(from.y, ya + dy, go), call.side, scale, walk * 0.5 + j * 1.3, 0.95 - 0.7 * hurt, spooked > 0 || hurt < 0.05);
+          const gx = lerp(from.x, x, go);
+          const gy = lerp(from.y, ya + dy, go);
+          spook(gx, gy, call.side, scale, walk * 0.5 + j * 1.3, 0.95 - 0.7 * hurt, spooked > 0 || hurt < 0.05, 0, facing(gx, gy));
         });
       }
       const yk = yOf(call.koAt);
@@ -1474,51 +1760,62 @@ export function Field(props: Props) {
     const still = reduced() || moved < dt * 0.00005;
     const strideNow = reduced() ? 0 : Math.floor(((gait.walked / 0.5) % 1) * STRIDES);
     const tremble = still && !reduced() ? Math.sin(at / 37) * 0.5 : 0;
+    // They walk a step behind the price, the ring round it on the ground ahead of them where the middle one's torch shines.
     shadows.push(() => {
-      const p = S(0, y0);
+      const p = S(kx, y0);
       blob(ctx, p.x, p.y, 0.8 * A, 0.36 * A, [92, 108, 136], 0.55 * sun);
     });
-    casters.push({ x: 0, y: y0, h: 1.2 * A, w: 0.9 * A });
-    put(0, y0, () => {
-      const p = S(0, y0, Math.sin(spooked * Math.PI) * 14 * k);
+    const jump = Math.sin(spooked * Math.PI) * 14 * k;
+    const kidsNow = kidsAt(Math.round(2.05 * k * dpr * 10) / 10, strideNow);
+    casters.push({ x: kx, y: y0, z: jump, shape: () => shapeOf(kidsNow, dpr) });
+    let torch: Pt | null = null;
+    put(kx, y0, () => {
+      const p = S(kx, y0, jump);
       p.x += tremble;
-      oval(ctx, p.x, p.y + Math.sin(spooked * Math.PI) * 14 * k, 22 * k, 11 * k, undefined, COLORS.volt, 2);
-      const px = Math.round(2.05 * k * dpr * 10) / 10;
-      const f = kidsAt(px, strideNow);
+      const f = kidsNow;
       ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
       const lamp = kidsLantern(2.05 * k);
-      glows.push({ p: { x: p.x + lamp.x, y: p.y + lamp.y }, r: 3.2 * A, color: "rgba(255, 196, 120, 0.5)" });
+      glows.push({ p: { x: p.x + lamp.x, y: p.y + lamp.y }, r: 3.2 * A, rgb: "255, 196, 120", a: 0.5 });
+      const lens = kidsTorch(2.05 * k);
+      torch = { x: p.x + lens.x, y: p.y + lens.y };
+      glows.push({ p: torch, r: 0.35 * A, rgb: "255, 236, 190", a: 0.7 });
     });
     // Lightning lights the field for a moment: the soft shadows from above give way to hard, long ones thrown straight away from it.
     sun = glare.length ? 0.2 : 1;
     ctx.globalCompositeOperation = "multiply";
     shadows.forEach((fn) => fn());
-    const thrown = (f: Pt, dx: number, dy: number, len: number, w: number, a: number) => {
-      const nx = -dy * 0.5;
-      const ny = dx * 0.5;
-      ctx.fillStyle = `rgba(26, 28, 56, ${a})`;
-      ctx.beginPath();
-      ctx.moveTo(f.x + nx * w * 0.7, f.y + ny * w * 0.7);
-      ctx.lineTo(f.x + dx * len + nx * w * 1.3, f.y + dy * len + ny * w * 1.3);
-      ctx.lineTo(f.x + dx * len - nx * w * 1.3, f.y + dy * len - ny * w * 1.3);
-      ctx.lineTo(f.x - nx * w * 0.7, f.y - ny * w * 0.7);
-      ctx.closePath();
-      ctx.fill();
-    };
+    ctx.globalCompositeOperation = "source-over";
+    const ring = S(0, y0);
+    oval(ctx, ring.x, ring.y, 22 * k, 11 * k, undefined, COLORS.volt, 2);
+    ctx.globalCompositeOperation = "multiply";
+    // Each one's own silhouette, laid flat on the ground away from the strike: its height runs off along the ground, longer the
+    // nearer the strike, and its width lies across, kept the way round it's drawn.
     for (const c of casters) {
+      if (!glare.length) break;
       const f = S(c.x, c.y);
+      let shape: Shape | null = null;
       for (const src of glare) {
         const d = Math.hypot(c.x - src.x, c.y - src.y);
         if (d > 6 || d < 0.05) continue;
         const o = S(src.x, src.y);
         const len = Math.hypot(f.x - o.x, f.y - o.y) || 1;
-        thrown(f, (f.x - o.x) / len, (f.y - o.y) / len, c.h * (2.4 + 2.2 * (1 - d / 6)), c.w, 0.25 + 0.5 * (1 - d / 6));
+        const dx = (f.x - o.x) / len;
+        const dy = (f.y - o.y) / len;
+        shape ??= c.shape();
+        const reach = (2.4 + 2.2 * (1 - d / 6)) * (c.tall ?? 1);
+        const flip = dy > 0 || (dy === 0 && dx < 0) ? -1 : 1;
+        ctx.setTransform(-dy * flip * dpr, dx * flip * 0.5 * dpr, -dx * reach * dpr, -dy * reach * dpr, f.x * dpr, f.y * dpr);
+        ctx.globalAlpha = 0.25 + 0.5 * (1 - d / 6);
+        ctx.drawImage(silhouette(shape.c), -shape.ox, -shape.oy - (c.z ?? 0), shape.w, shape.h);
       }
     }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.restore();
     stood.sort((a, b) => a.d - b.d).forEach((s) => s.draw());
     if (yf !== null) drawCloud(cloudX, yf, 1);
+    for (const f of fading) drawCloud(f.x, f.y, f.alpha);
 
     // Further into the future the haze thickens until the land is lost in it, and the far ground fades into the sky along the top.
     const fogFrom = S(F, 0);
@@ -1528,11 +1825,19 @@ export function Field(props: Props) {
     poly(ctx, [S(F, ext.y0), S(ext.x1 + 1, ext.y0), S(ext.x1 + 1, ext.y1), S(F, ext.y1)], undefined);
     ctx.fillStyle = fog;
     ctx.fill();
-    const far = ctx.createLinearGradient(0, 0, 0, v.h * 0.32);
-    far.addColorStop(0, css(CLAY.haze, 0.38));
-    far.addColorStop(1, css(CLAY.haze, 0));
-    ctx.fillStyle = far;
-    ctx.fillRect(0, 0, v.w, v.h * 0.32);
+    let far = distance.current;
+    if (!far || far.width !== c.width || far.height !== Math.ceil(c.height * 0.32)) {
+      far = distance.current = document.createElement("canvas");
+      far.width = c.width;
+      far.height = Math.ceil(c.height * 0.32);
+      const gf = far.getContext("2d")!;
+      const fade = gf.createLinearGradient(0, 0, 0, far.height);
+      fade.addColorStop(0, css(CLAY.haze, 0.38));
+      fade.addColorStop(1, css(CLAY.haze, 0));
+      gf.fillStyle = fade;
+      gf.fillRect(0, 0, far.width, far.height);
+    }
+    ctx.drawImage(far, 0, 0, v.w, far.height / dpr);
 
     // Low mist drifting over the grass at dusk, and once the storm builds, the shadows of its clouds passing over.
     if (!reduced()) {
@@ -1546,16 +1851,8 @@ export function Field(props: Props) {
           [0.1 * (1 - wet), CLAY.haze],
           [0.22 * wet, [34, 42, 66] as RGB],
         ] as const) {
-          if (alpha < 0.01) continue;
-          ctx.save();
-          ctx.translate(cx, cy);
-          ctx.scale(1, 0.38);
-          const patch = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
-          patch.addColorStop(0, css(color, alpha));
-          patch.addColorStop(1, css(color, 0));
-          ctx.fillStyle = patch;
-          ctx.fillRect(-r, -r, r * 2, r * 2);
-          ctx.restore();
+          if (alpha < 0.01 || cx + r < 0 || cx - r > v.w) continue;
+          blob(ctx, cx, cy, r, r * 0.38, color, alpha);
         }
       }
     }
@@ -1613,28 +1910,20 @@ export function Field(props: Props) {
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.restore();
     ctx.globalCompositeOperation = "lighter";
-    // Fireflies over the grass while it's dry, and a pool of lantern light on the ground about them.
+    // Fireflies over the grass while it's dry, fewer on a phone's smaller field, and a pool of lantern light on the ground about them.
     const dry = 1 - wet;
     if (dry > 0.05 && !reduced()) {
       const t = at / 1000;
-      for (let n = 0; n < 26; n++) {
+      for (let n = 0; n < (v.w < 600 ? 16 : 26); n++) {
         const blink = Math.max(0, Math.sin(t * (1.3 + hash(n) * 1.4) + n * 2.7));
         if (blink < 0.05) continue;
         const fx = hash(n * 7.3) * v.w + Math.sin(t * 0.31 + n) * 40;
         const fy = v.h * (0.2 + hash(n * 3.1) * 0.75) + Math.cos(t * 0.43 + n * 1.9) * 24;
-        glows.push({ p: { x: fx, y: fy }, r: 7, color: `rgba(222, 255, 150, ${0.75 * blink * dry})` });
+        glows.push({ p: { x: fx, y: fy }, r: 7, rgb: "222, 255, 150", a: 0.75 * blink * dry });
       }
     }
     const lamp = S(0, y0);
-    ctx.save();
-    ctx.translate(lamp.x, lamp.y);
-    ctx.scale(1, 0.5);
-    const pool = ctx.createRadialGradient(0, 0, 0, 0, 0, 2.6 * A);
-    pool.addColorStop(0, "rgba(255, 186, 104, 0.3)");
-    pool.addColorStop(1, "rgba(255, 186, 104, 0)");
-    ctx.fillStyle = pool;
-    ctx.fillRect(-2.6 * A, -2.6 * A, 5.2 * A, 5.2 * A);
-    ctx.restore();
+    shine(ctx, lamp.x, lamp.y, 2.6 * A, 1.3 * A, "255, 186, 104", 0.3, false);
     // The coin, like a signal in the sky: a disc of lantern light on the ground under the kids with the market's mark cut out of it.
     const mark0 = coin ? signalOf(coin) : null;
     if (mark0) {
@@ -1646,13 +1935,23 @@ export function Field(props: Props) {
       ctx.restore();
       ctx.globalCompositeOperation = "lighter";
     }
-    for (const glow of [...glows, ...flashes]) {
-      const halo = ctx.createRadialGradient(glow.p.x, glow.p.y, 0, glow.p.x, glow.p.y, glow.r);
-      halo.addColorStop(0, glow.color);
-      halo.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = halo;
-      ctx.fillRect(glow.p.x - glow.r, glow.p.y - glow.r, glow.r * 2, glow.r * 2);
+    const lens = torch as Pt | null;
+    if (lens) {
+      const dx = lamp.x - lens.x;
+      const dy = lamp.y - lens.y;
+      const L = Math.hypot(dx, dy);
+      if (L > 2) {
+        ctx.save();
+        ctx.translate(lens.x, lens.y);
+        ctx.rotate(Math.atan2(dy, dx));
+        ctx.globalAlpha = 0.42;
+        const sx = L / 228;
+        const sy = (0.75 * A) / 46;
+        ctx.drawImage(beam(), -8 * sx, -64 * sy, 256 * sx, 128 * sy);
+        ctx.restore();
+      }
     }
+    for (const glow of [...glows, ...flashes]) shine(ctx, glow.p.x, glow.p.y, glow.r, glow.r, glow.rgb, glow.a, true);
     ctx.globalCompositeOperation = "source-over";
     bolts.forEach((fn) => fn());
 
@@ -1666,8 +1965,9 @@ export function Field(props: Props) {
       ctx.restore();
     }
 
-    // Tilt-shift, like a model photographed close up: the top and bottom of the view go soft. Too costly on a phone.
-    if (v.w >= 600) {
+    // Tilt-shift, like a model photographed close up: the top and bottom of the view go soft. Too costly on a phone or tablet, or
+    // on a field of a great many pixels.
+    if (v.w >= 600 && !coarse() && c.width * c.height <= 8e6) {
       const tw = Math.max(1, Math.round(c.width / 2));
       const th = Math.max(1, Math.round(c.height / 2));
       const b = soft.current ?? document.createElement("canvas");
@@ -1736,9 +2036,8 @@ export function Field(props: Props) {
     for (let p = Math.ceil(priceAt(ext.y1) / stepP) * stepP; p < priceAt(ext.y0); p += stepP) {
       const y = yOf(p);
       const text = fmt.price(p, Math.max(tickSize, stepP / 100));
-      const shift = (Math.round(p / stepP) % 2) * (STRIDE / 2);
-      for (let i = Math.floor((nowX + ext.x0 - shift) / STRIDE); i * STRIDE + shift - nowX < ext.x1; i++) {
-        const x = i * STRIDE + shift - nowX;
+      for (let i = Math.floor((nowX + ext.x0) / STRIDE); i * STRIDE - nowX < ext.x1; i++) {
+        const x = i * STRIDE - nowX;
         const a = clamp(1 + x / 7, 0, 1) * clamp(1 - (x - 4) / 8, 0, 1) * 0.55;
         if (a < 0.04 || Math.hypot(x, y - y0) < 2.4) continue;
         if (yf !== null && Math.abs(S(x, y).y - S(cloudX, yf, CLOUD_Z).y) < 1.6 * A && Math.abs(S(x, y).x - S(cloudX, yf).x) < 2.4 * A) continue;
@@ -1765,7 +2064,8 @@ export function Field(props: Props) {
     if (now < span.to && !(now < span.from && left <= 10_000)) {
       const lobby = now < span.from;
       const xl = -0.5;
-      const yl = Math.min(xl + (v.OX - 28) / A, (2 * (v.h - 28 - v.OY)) / A - xl);
+      const edge = 28 + 18 * WORDS;
+      const yl = Math.min(xl + (v.OX - edge) / A, (2 * (v.h - edge - v.OY)) / A - xl);
       const hurry = !lobby && nextAt === span.to && left < 10_000;
       const big = lobby ? 1.25 : 0.95;
       const color = hurry && Math.floor(at / 250) % 2 ? COLORS.down : COLORS.volt;
@@ -1806,13 +2106,16 @@ export function Field(props: Props) {
       const c = canvas.current;
       if (!c) return;
       const { width, height } = el.getBoundingClientRect();
-      c.width = Math.round(width * devicePixelRatio);
-      c.height = Math.round(height * devicePixelRatio);
+      DPR = ratioFor(width);
+      c.width = Math.round(width * DPR);
+      c.height = Math.round(height * DPR);
       // The kids in the middle of the view, the past running off to the west and the future's haze to the east; on a narrow screen
       // more of the past goes, so the kids stay big.
       const span = P + F + R;
       const A = clamp(Math.min((width - 24) / (F + R + P * (width < 600 ? 0.25 : 0.45)), (height - 40) / (span / 2 + 1.4)), 8, 44);
       view.current = { w: width, h: height, A, OX: width / 2 + (R / 2) * A, OY: height / 2 - (R / 4) * A + 0.4 * A };
+      // Resizing clears the canvas, so a paused field is drawn again at once.
+      draw();
     };
     const css = getComputedStyle(document.documentElement);
     MONO = css.getPropertyValue("--mono") || MONO;
@@ -1821,14 +2124,25 @@ export function Field(props: Props) {
     observer.observe(el);
     resize();
 
+    // The field rests while nobody can see it: scrolled away, behind the result at the end, or under a dialog.
     let frame = 0;
-    const loop = () => {
-      if (!document.hidden) draw();
+    let shown = true;
+    let covered = false;
+    let looked = 0;
+    const sight = new IntersectionObserver(([e]) => (shown = e.isIntersecting));
+    sight.observe(el);
+    const loop = (t: number) => {
+      if (t - looked > 400) {
+        looked = t;
+        covered = !!document.querySelector(".debrief, .modal");
+      }
+      if (!document.hidden && shown && !covered) draw();
       frame = requestAnimationFrame(loop);
     };
     frame = requestAnimationFrame(loop);
     return () => {
       observer.disconnect();
+      sight.disconnect();
       cancelAnimationFrame(frame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

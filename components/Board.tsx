@@ -64,6 +64,9 @@ export function Board({ game, round, waiting }: Props) {
   const tops = useRef(new Map<string, number>());
   const gone = useRef(new Set<string>());
   const standing = standingCount(game);
+  const ranked = standings(game);
+  // The panels are measured only when the order changes or someone goes out, not on every tick of the clock.
+  const order = ranked.map((f) => `${f.id}${f.out ? "!" : ""}`).join(" ");
 
   useLayoutEffect(() => {
     const ol = list.current;
@@ -96,7 +99,7 @@ export function Board({ game, round, waiting }: Props) {
     fresh.forEach((el, i) => enter(el, first ? i * 45 : 0));
     // A knockout lands where it happened before the board closes over it.
     moves.forEach((m) => slide(m.el, m.dy, m.k, m.far, fell ? 420 : 0));
-  });
+  }, [order]);
 
   return (
     <aside className={s.board} aria-label="The players">
@@ -107,7 +110,7 @@ export function Board({ game, round, waiting }: Props) {
         </span>
       </h2>
       <ol ref={list} className={s.list}>
-        {standings(game).map((f, i) => {
+        {ranked.map((f, i) => {
           const [text, tone] = stateOf(f, waiting || foughtIn(game, f, round));
           return (
             <Panel

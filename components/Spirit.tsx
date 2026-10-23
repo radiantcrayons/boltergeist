@@ -128,10 +128,15 @@ export function Spirit({ role, mood = "ready", className, scene = false, spin = 
     draw();
     const seen = new ResizeObserver(draw);
     seen.observe(c);
+    // It only moves while it can be seen: scrolled away or in a hidden tab, it waits where it was.
+    let shown = true;
+    const sight = new IntersectionObserver(([e]) => (shown = e.isIntersecting));
+    sight.observe(c);
     const timer = still
       ? undefined
       : setInterval(
           () => {
+            if (!shown || document.hidden) return;
             tick++;
             draw();
           },
@@ -139,6 +144,7 @@ export function Spirit({ role, mood = "ready", className, scene = false, spin = 
         );
     return () => {
       seen.disconnect();
+      sight.disconnect();
       clearInterval(timer);
     };
   }, [role, mood, scene, spin]);

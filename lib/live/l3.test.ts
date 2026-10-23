@@ -178,3 +178,13 @@ test("a price's key is the same whichever way it's written, and a number lands o
   assert.equal(key(77.2804, 0.001), keyOf("77.280"));
   assert.equal(key(0.1 + 0.2, 0.1), "0.3");
 });
+
+test("a short list of the best levels matches the best of the whole side sorted", () => {
+  const side = (n: number, from: number, step: number) => Array.from({ length: n }, (_, i) => ({ price: (from + ((i * 37) % n) * step).toFixed(2), orders: [{ order_id: `o${from}${i}`, size: String(1 + (i % 5)) }] }));
+  const book = fromSnapshot({ ...SNAP, bids: side(90, 50, 0.01), asks: side(90, 60, 0.01) });
+  for (const s of ["buy", "sell"] as const) {
+    const all = levels(book, s);
+    assert.deepEqual(levels(book, s, 7), all.slice(0, 7));
+    assert.deepEqual(levels(book, s, 40), all.slice(0, 40));
+  }
+});

@@ -33,18 +33,34 @@ export default function App() {
 
   useEffect(() => {
     loadMarkets().then(setMarkets, (err: Error) => setFatal(err.message));
-    return stream({
+    // Every market's marks come in together. They're handed on at most four times a second, each one still kept for the ticks.
+    let held: Record<string, Mark>[] = [];
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let last = 0;
+    const flush = () => {
+      timer = null;
+      last = Date.now();
+      const batches = held;
+      held = [];
+      setMarks((all) => Object.assign({ ...all }, ...batches));
+      setTicks((all) => {
+        const next = { ...all };
+        for (const m of batches) for (const [s, mark] of Object.entries(m)) next[s] = withTick(next[s] ?? loadTicks(s), mark);
+        return next;
+      });
+    };
+    const stop = stream({
       marks: (m) => {
-        setMarks((all) => ({ ...all, ...m }));
-        setTicks((all) => {
-          const next = { ...all };
-          for (const [s, mark] of Object.entries(m)) next[s] = withTick(next[s] ?? loadTicks(s), mark);
-          return next;
-        });
+        held.push(m);
+        timer ??= setTimeout(flush, Math.max(0, last + 250 - Date.now()));
       },
       tickers: (t) => setTickers((all) => ({ ...all, ...t })),
       status: setStreaming,
     });
+    return () => {
+      stop();
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {

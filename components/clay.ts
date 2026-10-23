@@ -375,6 +375,19 @@ function kidsLantern3(bob: number): { hand: V; lamp: V } {
   return { hand, lamp: [hand[0] + 0.1, hand[1], hand[2] - 2] };
 }
 
+// How far ahead of the children's feet, in model units, the middle one's torch lights the ground: where the price is.
+export const KIDS_LEAD = 7;
+const TORCH: RGB = [70, 74, 88];
+
+// Where the middle child's hand is, and the torch in it shining ahead and down onto the ground.
+function kidsTorch3(bob: number): { hand: V; tip: V } {
+  const k = CHILDREN[1];
+  const s = k.tall / 15;
+  const hand: V = [k.at[0] + 2.8 * s, k.at[1] + 2.3 * s, 6.6 * s + bob];
+  const d = norm([KIDS_LEAD - hand[0], -hand[1], -hand[2]]);
+  return { hand, tip: [hand[0] + d[0] * 1.9, hand[1] + d[1] * 1.9, hand[2] + d[2] * 1.9] };
+}
+
 // A child: legs and arms swinging unless a hand is holding on somewhere, head turned a little, eyes wide and mouth open.
 function child(k: Child, phase: number, reach: (V | null)[]): Part[] {
   const parts: Part[] = [];
@@ -425,21 +438,30 @@ function kids(stride: number, strides: number): Part[] {
   const [eldest, middle, youngest] = CHILDREN;
   const bob = (k: Child) => Math.abs(Math.cos(phase + k.lag)) * 0.3 * (k.tall / 15);
   const { hand, lamp } = kidsLantern3(bob(eldest));
+  const torch = kidsTorch3(bob(middle));
   const sleeve = shoulderOf(eldest, 1, bob(eldest));
   const elbow = shoulderOf(middle, 1, bob(middle));
   const parts = [
     ...child(eldest, phase, [null, hand]),
-    ...child(middle, phase + middle.lag, [[sleeve[0] - 0.4, sleeve[1] + 0.6, sleeve[2] - 1.2], null]),
+    ...child(middle, phase + middle.lag, [[sleeve[0] - 0.4, sleeve[1] + 0.6, sleeve[2] - 1.2], torch.hand]),
     ...child(youngest, phase + youngest.lag, [[elbow[0] - 0.2, elbow[1] + 0.6, elbow[2] - 1.8], null]),
   ];
   parts.push(bone(hand, [lamp[0], lamp[1], lamp[2] + 1.1], 0.14, INK));
   parts.push(part([lamp[0], lamp[1], lamp[2] + 1.05], [0.65, 0.65, 0.3], INK));
   parts.push(part([lamp[0], lamp[1], lamp[2] - 0.95], [0.6, 0.6, 0.22], INK));
   parts.push({ ...part(lamp, [0.75, 0.75, 0.95], LAMP), glow: true });
+  parts.push(bone(torch.hand, torch.tip, 0.4, TORCH));
+  parts.push({ ...part(torch.tip, [0.46, 0.46, 0.46], LAMP), glow: true });
   return parts;
 }
 
 export const paintKids = (px: number, stride: number, strides: number) => render(kids(stride, strides), px, 19, 15, 33);
+
+// The torch's lens from the children's feet, in pixels, for its beam.
+export function kidsTorch(px: number) {
+  const [x, y, z] = kidsTorch3(0.3 * (CHILDREN[1].tall / 15)).tip;
+  return { x: (x - y) * px, y: ((x + y) / 2 - z) * px };
+}
 
 // The lantern's place from the children's feet, in pixels, for its glow.
 export function kidsLantern(px: number) {

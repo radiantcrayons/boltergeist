@@ -32,7 +32,7 @@ import { play, type Sound } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
 import { klines } from "@/lib/strike";
 import type { Candle } from "@/lib/types";
-import { COLORS, type Mark, type Pick, type Pin } from "./Chart";
+import { COLORS, type Mark, type Pick, type Pin } from "./marks";
 import { Cutscene, type Scene } from "./Cutscene";
 import { Board } from "./Board";
 import { Field, type Yours } from "./Field";
@@ -196,11 +196,17 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   );
   const lineAhead = inLine && l3.book ? ahead(l3.book, inLine) : null;
   const flagAhead = flagLine && l3.book ? ahead(l3.book, flagLine) : null;
-  const walls = l3.book
-    ? (["buy", "sell"] as const).flatMap((side) =>
-        bookLevels(l3.book!, side, 40).map((l) => ({ p: l.price, side: side === "buy" ? ("long" as const) : ("short" as const), orders: l.orders.map((o) => o.size * l.price) })),
-      )
-    : [];
+  // The book changes in place a few times a second; its walls are worked out again only when it does.
+  const { book: liveBook, version: bookVersion } = l3;
+  const walls = useMemo(
+    () =>
+      liveBook && bookVersion > 0
+        ? (["buy", "sell"] as const).flatMap((side) =>
+            bookLevels(liveBook, side, 40).map((l) => ({ p: l.price, side: side === "buy" ? ("long" as const) : ("short" as const), orders: l.orders.map((o) => o.size * l.price) })),
+          )
+        : [],
+    [liveBook, bookVersion],
+  );
   const blasts = (l3.tape?.fills ?? []).filter((f) => nowMs - f.at < 900).map((f) => ({ p: Number(f.price), at: f.at }));
   const bank = () => can && me.call && war.bank(game.id);
   const sideOf = (p: number): Side => (p < game.price ? "long" : "short");
