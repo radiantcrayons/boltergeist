@@ -157,6 +157,7 @@ export default function App() {
     }
     setLive(next !== "paper");
     if (next !== "paper" && !session) setConnecting(true);
+    if (next === "paper") setConnecting(false);
   };
   const enter = (kind: Kind, role: Role, real = goingLive) =>
     void war.enter(kind, role, real).then((id) => {
@@ -182,7 +183,13 @@ export default function App() {
             </button>
           ))}
         </div>
-        <button className={`account ${session ? "on" : ""}`} onClick={() => setConnecting(true)}>
+        {/* Paper has nothing to connect to: its network is mainnet only for the prices. */}
+        <button
+          className={`account ${session ? "on" : ""}`}
+          onClick={() => setConnecting(true)}
+          disabled={mode === "paper"}
+          title={mode === "paper" ? "Pick testnet or mainnet to connect to Strike" : undefined}
+        >
           {session ? (balance ? fmt.money(balance.available) : "connected") : "connect"}
         </button>
         <button
@@ -219,6 +226,7 @@ export default function App() {
           marks={marks}
           tickers={tickers}
           live={goingLive}
+          paper={mode === "paper"}
           available={balance?.available ?? null}
           nickname={balance?.nickname ?? null}
           joining={war.joining}

@@ -1951,6 +1951,11 @@ h2 {
   text-transform: none;
 }
 
+.account:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .modal {
   position: fixed;
   inset: 0;

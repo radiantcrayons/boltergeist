@@ -25,6 +25,8 @@ type Props = {
   marks: Record<string, Mark>;
   tickers: Record<string, Ticker>;
   live: boolean;
+  // Paper picked in the header, rather than testnet or mainnet without a connection yet.
+  paper: boolean;
   available: number | null;
   // The nickname on the player's Strike account, once connected.
   nickname: string | null;
@@ -36,7 +38,7 @@ type Props = {
   onOpen: (id: string) => void;
 };
 
-export function Base({ games, markets, marks, tickers, live, available, nickname, joining, error, onConnect, onSymbol, onEnter, onOpen }: Props) {
+export function Base({ games, markets, marks, tickers, live, paper, available, nickname, joining, error, onConnect, onSymbol, onEnter, onOpen }: Props) {
   const [kind, setKind] = useState<Kind>(() => (recall<string>("kind", "skirmish") in KINDS ? recall<Kind>("kind", "skirmish") : "skirmish"));
   const [role, setRole] = useState<Role>(() => (recall<string>("role", "commando") in ROLES ? recall<Role>("role", "commando") : "commando"));
   const [hover, setHover] = useState<Role | null>(null);
@@ -227,10 +229,16 @@ export function Base({ games, markets, marks, tickers, live, available, nickname
       {!live && (
         <p className="golive">
           Playing on paper.{" "}
-          <button className="link" onClick={onConnect}>
-            Connect to Strike
-          </button>{" "}
-          to dig real graves in Strike&apos;s book.
+          {paper ? (
+            <>Pick testnet or mainnet up top to dig real graves in Strike&apos;s book.</>
+          ) : (
+            <>
+              <button className="link" onClick={onConnect}>
+                Connect to Strike
+              </button>{" "}
+              to dig real graves in Strike&apos;s book.
+            </>
+          )}
         </p>
       )}
 
