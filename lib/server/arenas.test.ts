@@ -21,6 +21,9 @@ let LOW: number | undefined;
 let CANDLE: { t: number; low: number } | undefined;
 let MAX_LEVERAGE: number | undefined;
 let markAsks = 0;
+// How long Strike takes to answer for its price, as the game's clock sees it, and something else happening meanwhile.
+let SLOW = 0;
+let DURING: (() => Promise<void>) | undefined;
 const ACCOUNTS: Record<string, string> = {};
 const SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"];
 globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
@@ -28,6 +31,12 @@ globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   if (u.includes("exchangeInfo")) return Response.json({ symbols: SYMBOLS.map((symbol) => ({ symbol, status: "trading" })) });
   if (u.includes("markPrice")) {
     markAsks++;
+    clock += SLOW;
+    if (DURING) {
+      const meanwhile = DURING;
+      DURING = undefined;
+      await meanwhile();
+    }
     return Response.json({ p: String(u.includes("testnet") ? TEST_MARK : MARK) });
   }
   if (u.includes("klines")) {
@@ -330,6 +339,37 @@ test("power is held to what the market allows", async () => {
   await assert.rejects(store.act(a, { secret: me, what: "call", side: "long", power: 25 }), /20x/);
   assert.equal((await store.act(a, { secret: me, what: "call", side: "long", power: 20 })).power, 20);
   MAX_LEVERAGE = undefined;
+});
+
+test("a player signed in to Strike under a name already taken gets a number after it, not an error", async () => {
+  const a = await battle();
+  ACCOUNTS["f".repeat(64)] = "acct-9";
+  await store.join(a, { secret: secret(), name: "Same Nick", role: "soldier" });
+  const live = await store.join(a, { secret: secret(), name: "Same Nick", role: "warlord", proof: proof("f".repeat(64)) });
+  assert.equal(live.player.name, "Same Nick 2");
+});
+
+test("a move that waited on Strike is stamped when it goes in, so readers behind the cursor still see it", async () => {
+  const a = await battle();
+  const me = secret();
+  await store.join(a, { secret: me, name: "Slow Mover", role: "commando" });
+  clock += 1000;
+  const asked = clock;
+  let cursor = "";
+  SLOW = 12_000;
+  DURING = async () => {
+    cursor = (await store.log(a, { fresh: true })).next;
+  };
+  try {
+    const call = await store.act(a, { secret: me, what: "call", side: "long", power: 5 });
+    assert.ok(call.at >= asked + 12_000);
+    assert.ok(cursor);
+    const later = await store.log(a, { after: cursor });
+    assert.ok(later.moves.some((m) => m.at === call.at));
+  } finally {
+    SLOW = 0;
+    DURING = undefined;
+  }
 });
 
 test("one browser holds one seat in a game, on paper or signed in, whichever it took first", async () => {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { caught, close, filledOf, hit, lay, lift, open, plant } from "../live/desk";
+import { caught, close, closedBy, filledOf, hit, lay, lift, open, plant } from "../live/desk";
 import { strike } from "../live/exchange";
 import { BUILDER, type Session } from "../live/session";
 import { Full, gather, join, look, tell, Wait } from "../online";
@@ -168,11 +168,14 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
 
   // A game that's gone a while without a price (a phone in a pocket, a tab asleep) is caught up from Strike's candles rather
   // than in one step, so it plays out as it did for everyone else. A catch up that fails is tried again now and then.
+  // Each game's last mark, by Strike's clock and by this one, so a gap is measured on one clock and a slow device clock can't
+  // look like a gap that never closes.
   const tried = useRef(new Map<string, number>());
+  const lastMark = useRef(new Map<string, { at: number; seen: number }>());
   const behind = useCallback(
-    (g: Game, at: number) => {
+    (g: Game, gap: number) => {
       const now = Date.now();
-      if (g.over || g.at < g.startsAt || syncing.current.has(g.id) || at - g.at <= GAP || now - (tried.current.get(g.id) ?? 0) < RETRY) return false;
+      if (g.over || g.at < g.startsAt || syncing.current.has(g.id) || gap <= GAP || now - (tried.current.get(g.id) ?? 0) < RETRY) return false;
       tried.current.set(g.id, now);
       sync(g);
       return true;
@@ -183,7 +186,11 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   // focused, or a frozen page resumed.
   useEffect(() => {
     const back = () => {
-      if (document.visibilityState === "visible") for (const g of latest.current.games) behind(g, Date.now());
+      if (document.visibilityState !== "visible") return;
+      for (const g of latest.current.games) {
+        const last = lastMark.current.get(g.id);
+        behind(g, last ? Date.now() - last.seen : Date.now() - g.at);
+      }
     };
     document.addEventListener("visibilitychange", back);
     document.addEventListener("resume", back);
@@ -202,7 +209,15 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   // at the bell for the game's price, so everyone in it ends on the same one.
   const moveOn = useCallback(
     (all: Record<string, Mark>, ticking: boolean) => {
-      if (!ticking) for (const g of latest.current.games) if (all[g.symbol]) behind(g, all[g.symbol].at);
+      if (!ticking)
+        for (const g of latest.current.games) {
+          const m = all[g.symbol];
+          if (!m) continue;
+          const last = lastMark.current.get(g.id);
+          if (last?.at === m.at) continue;
+          behind(g, last ? m.at - last.at : m.at - g.at);
+          lastMark.current.set(g.id, { at: m.at, seen: Date.now() });
+        }
       setGames((gs) => {
         if (!gs.some((g) => !g.over && all[g.symbol])) return gs;
         let moved = false;
@@ -410,7 +425,16 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
             await lift(ex, g.symbol, c.flagOrder).catch(() => null);
           }
           if (!held) {
+            // A give-up Strike took its time over is a give-up, not a bust.
+            const gave = await closedBy(ex, g.symbol, c.live);
             known.current.delete(c.live);
+            if (gave) {
+              const price = gave.price || latest.current.marks[g.symbol]?.p || g.price;
+              const value = Math.max(0, valueOf(c, price, 0) - gave.fee);
+              update(g.id, (x) => (yours(x)?.call?.live === c.live ? bankIn(x, Date.now(), { price, value }) : x));
+              announce(g, { what: "bank", price, value, live: true });
+              continue;
+            }
             update(g.id, (x) => (yours(x)?.call?.live === c.live ? knockedOut(x, Date.now(), c.koAt) : x));
             announce(g, { what: "ko", price: c.koAt });
           } else if (held.koAt && Math.abs(held.koAt - c.koAt) > 1e-9) {
@@ -596,7 +620,15 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
         closing.current.add(liveId);
         try {
           const mark = latest.current.marks[g.symbol]?.p ?? g.price;
-          const out = await close(ex, { market, mark, live: liveId, feeRate: FEE_RATE, estimate: valueOf(c, mark) });
+          let out = await close(ex, { market, mark, live: liveId, feeRate: FEE_RATE, estimate: valueOf(c, mark) });
+          if (out === "gone") {
+            const gave = await closedBy(ex, g.symbol, liveId);
+            if (gave) {
+              const price = gave.price || mark;
+              const value = Math.max(0, valueOf(c, price, 0) - gave.fee);
+              out = { price, value, made: value - c.stake };
+            }
+          }
           known.current.delete(liveId);
           update(id, (x) => {
             if (yours(x)?.call?.live !== liveId) return out === "gone" ? x : settle(x, out.value);

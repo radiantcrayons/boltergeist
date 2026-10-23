@@ -389,7 +389,8 @@ async function sit(a: Game, id: string, device: string, name: string, role: Role
       // In already, from another tab or device at the same moment.
       if (codes[1] === "ConditionalCheckFailed") return (await seatAt(a, id))!.player!;
       if (codes[0] === "ConditionalCheckFailed") return null;
-      if (codes[2] === "ConditionalCheckFailed" && taken < 20) {
+      // The name's item comes after the device's link when there is one.
+      if (codes[id !== device ? 3 : 2] === "ConditionalCheckFailed" && taken < 20) {
         taken++;
         continue;
       }
@@ -420,9 +421,11 @@ export async function act(a: Game, body: Record<string, unknown>): Promise<Move>
     }
     const now = Math.max(Date.now(), was.lastAt + 1);
     const { move: asked, state: after } = await rule(a.kind, was, body, now, pricesOf(a));
-    const sk = moveSk(now, id, after.n);
-    const state: State = { ...after, k: key, sk: key && sk };
-    const move: Move = { at: now, who: id, ...asked };
+    // Stamped once the checks are done, which can wait on Strike, so the move never lands behind where others are reading from.
+    const stamped = Math.max(Date.now(), now);
+    const sk = moveSk(stamped, id, after.n);
+    const state: State = { ...after, lastAt: stamped, k: key, sk: key && sk };
+    const move: Move = { at: stamped, who: id, ...asked };
     try {
       await db().send(
         new TransactWriteCommand({

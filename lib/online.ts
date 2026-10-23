@@ -2,6 +2,7 @@ import { ROSTER, type Log, type Move, type Player, type Role } from "./game/war"
 import { signedHeaders, type Keys } from "./live/keys";
 import { PREFIX } from "./store";
 import { NETWORK } from "./strike";
+import { uid } from "./uid";
 
 // `chosen` once the player has typed a name of their own, so a nickname from Strike doesn't write over it.
 export type Me = { id: string; secret: string; name: string; chosen?: boolean };
@@ -133,18 +134,48 @@ export async function join(arena: string, role: Role, live: boolean, keys?: Keys
   return got && { me: got.player.id, arena: got.arena ?? arena, joinedAt: got.player.joinedAt - skew, log: local(got.log) };
 }
 
+// Each game's moves go one at a time, in the order they were made, so none overtakes the move it rests on.
+const outbox = new Map<string, Promise<unknown>>();
+
 // A move in a game, as the seat it was taken as. Only a move that may not have arrived (no answer, or the server failing) is sent
-// again, with the same key so the game server keeps it once; one turned away stays turned away.
-export async function tell(arena: string, seat: string, move: Omit<Move, "at" | "who">): Promise<void> {
+// again, with the same key so the game server keeps it once; one turned away stays turned away. Held by the game server, the
+// answer says so at once, and the move still goes when the hold lifts.
+export function tell(arena: string, seat: string, move: Omit<Move, "at" | "who">): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let answered = false;
+    const once =
+      <T>(fn: (v: T) => void) =>
+      (v: T) => {
+        if (answered) return;
+        answered = true;
+        fn(v);
+      };
+    const sent = (outbox.get(arena) ?? Promise.resolve()).then(() => deliver(arena, seat, move, once(reject)));
+    const settled = sent.catch(() => {});
+    outbox.set(arena, settled);
+    void settled.then(() => outbox.get(arena) === settled && outbox.delete(arena));
+    sent.then(once(resolve), once(reject));
+  });
+}
+
+async function deliver(arena: string, seat: string, move: Omit<Move, "at" | "who">, onHold: (w: Wait) => void): Promise<void> {
   const { secret } = await me();
-  const key = crypto.randomUUID();
-  for (let tries = 0; ; tries++) {
+  const key = uid();
+  const path = `/api/arenas/${arena}?net=${NETWORK}`;
+  for (let tries = 0, holds = 0; ; ) {
     try {
-      await send(`/api/arenas/${arena}?net=${NETWORK}`, { method: "POST", body: JSON.stringify({ ...move, secret, seat, key }) });
+      await send(path, { method: "POST", body: JSON.stringify({ ...move, secret, seat, key }) });
       return;
     } catch (err) {
+      if (err instanceof Wait && holds < 4) {
+        onHold(err);
+        holds++;
+        await new Promise((r) => setTimeout(r, Math.max(0, (held.get(routeOf(path)) ?? 0) - Date.now()) + 200 + Math.random() * 800));
+        continue;
+      }
       if (!(err instanceof Down || err instanceof Lost) || tries >= 2) throw err;
       await new Promise((r) => setTimeout(r, 500 * 2 ** tries + Math.random() * 250));
+      tries++;
     }
   }
 }

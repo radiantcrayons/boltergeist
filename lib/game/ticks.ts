@@ -8,7 +8,7 @@ export function candlesFrom(ticks: Tick[], ms: number): Candle[] {
   const out: Candle[] = [];
   for (const { p, at } of ticks) {
     const t = Math.floor(at / ms) * ms;
-    const last = out.at(-1);
+    const last = out[out.length - 1];
     if (last && last.t === t) {
       last.h = Math.max(last.h, p);
       last.l = Math.min(last.l, p);
@@ -20,7 +20,7 @@ export function candlesFrom(ticks: Tick[], ms: number): Candle[] {
   return out;
 }
 
-export const withTick = (ticks: Tick[], tick: Tick): Tick[] => (ticks.at(-1)?.at === tick.at ? ticks : [...ticks.slice(-(KEEP - 1)), tick]);
+export const withTick = (ticks: Tick[], tick: Tick): Tick[] => (ticks[ticks.length - 1]?.at === tick.at ? ticks : [...ticks.slice(-(KEEP - 1)), tick]);
 
 const key = (symbol: string) => `tradewars.ticks.${symbol}`;
 

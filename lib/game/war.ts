@@ -345,7 +345,7 @@ function bots(a: Pick<Arena, "id" | "kind" | "startsAt">, people: Fighter[], t: 
     .map((b) => b.fighter);
 }
 
-const known = (p: Player) => Object.hasOwn(ROLES, p.role);
+const known = (p: Player) => Object.prototype.hasOwnProperty.call(ROLES, p.role);
 
 const newcomer = (p: Player, id = p.id, name = p.name): Fighter => {
   const stake = ROLES[p.role].stake;

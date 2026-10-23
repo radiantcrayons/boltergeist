@@ -29,7 +29,6 @@ import {
 } from "@/lib/game/war";
 import { play, type Sound } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
-import { klines } from "@/lib/strike";
 import type { Candle } from "@/lib/types";
 import { COLORS, huesFor, type Mark, type Pick, type Pin } from "./marks";
 import { Cutscene, type Scene } from "./Cutscene";
@@ -72,7 +71,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [game.id]);
-  const candles = useCandles(game, ticks, mark);
+  const candles = useCandles(ticks);
   const value = worth(me, game.price);
   const made = value - stake;
   const round = roundAt(game, Math.min(nowMs, game.endsAt - 1));
@@ -189,7 +188,8 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     if (!l3.book || !trapSide || trapPrice === undefined || trapAt === undefined) return null;
     const place = join(l3.book, BOOK_SIDE[trapSide], bookKey(trapPrice, tickSize));
     // Live graves are already on Strike by the time they're dug here: the last order in their line of their size is yours, not ahead of you.
-    const last = l3.book[place.side].get(place.price)?.at(-1);
+    const queue = l3.book[place.side].get(place.price);
+    const last = queue?.[queue.length - 1];
     if (trapSize && last && Math.abs(last.size - trapSize) <= trapSize * 0.01) place.ahead.delete(last.id);
     return place;
   }, [l3.book, trapSide, trapPrice, trapAt, trapSize, tickSize]);
@@ -215,10 +215,12 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const tick = Math.floor(nowMs / 900);
   const blasts = useMemo(() => (fills ?? []).filter((f) => tick * 900 - f.at < 1800).map((f) => ({ p: Number(f.price), at: f.at })), [fills, tick]);
   const bank = () => can && me.call && war.bank(game.id);
-  const sideOf = (p: number): Side => (p < game.price ? "long" : "short");
+  // Taps are judged against the live price the kids are drawn at, which leads the game's own while it catches up.
+  const shownPrice = mark?.p ?? game.price;
+  const sideOf = (p: number): Side => (p < shownPrice ? "long" : "short");
   // A click takes the side of the price it lands on, then the nearest tick on that side, so one by the kids is never the price itself.
   const onTick = (p: number) => {
-    const up = p >= game.price;
+    const up = p >= shownPrice;
     let at = (up ? Math.ceil : Math.floor)(p / tickSize - (up ? 1e-9 : -1e-9)) * tickSize;
     if (up && at <= game.price) at += tickSize;
     if (!up && at >= game.price) at -= tickSize;
@@ -320,10 +322,10 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         <Field
             key={game.id}
             candles={candles}
-            intervalMs={kind.candleMs}
+            intervalMs={VIEW.candleMs}
             mark={mark?.p ?? null}
             tickSize={tickSize}
-            reach={kind.reach}
+            reach={VIEW.reach}
             yours={yours}
             role={me.role}
             walls={walls}
@@ -526,34 +528,10 @@ const FEARS = ["whisper", "howl", "shriek"];
 const COUNTS = [4, 8, 12];
 const FEAR_TIPS = ["The least power this round allows: hardest to bust", "Halfway between", "The most power the market allows: the biggest swings"];
 
-function useCandles(game: Game, ticks: Tick[], mark: { p: number; at: number } | null): Candle[] {
-  const kind = KINDS[game.kind];
-  const built = useMemo(() => (game.kind === "skirmish" ? candlesFrom(ticks, kind.candleMs) : []), [game.kind, ticks, kind.candleMs]);
-  const [fetched, setFetched] = useState<Candle[]>([]);
-  const [seen, setSeen] = useState(mark);
-  if (mark && mark !== seen) {
-    setSeen(mark);
-    setFetched((c) => withPrice(c, mark.p, mark.at, kind.candleMs));
-  }
-  useEffect(() => {
-    if (game.kind === "skirmish") return;
-    let stale = false;
-    klines(game.symbol, kind.candles === "15m" ? "15m" : "1m").then(
-      (c) => !stale && setFetched(c),
-      () => {},
-    );
-    return () => {
-      stale = true;
-    };
-  }, [game.kind, game.symbol, kind.candles]);
-  return game.kind === "skirmish" ? built : fetched;
-}
+// Every length of haunt is drawn at the Jump Scare's pace, five seconds a tile from the live prices, so the field moves alike in
+// all of them; the rounds and the rules keep their own clock.
+const VIEW = KINDS.skirmish;
 
-function withPrice(candles: Candle[], p: number, at: number, ms: number): Candle[] {
-  const last = candles.at(-1);
-  if (!last) return candles;
-  const t = Math.floor(at / ms) * ms;
-  if (t > last.t) return [...candles.slice(-999), { t, o: last.c, h: Math.max(last.c, p), l: Math.min(last.c, p), c: p }];
-  if (t < last.t) return candles;
-  return [...candles.slice(0, -1), { ...last, h: Math.max(last.h, p), l: Math.min(last.l, p), c: p }];
+function useCandles(ticks: Tick[]): Candle[] {
+  return useMemo(() => candlesFrom(ticks, VIEW.candleMs), [ticks]);
 }

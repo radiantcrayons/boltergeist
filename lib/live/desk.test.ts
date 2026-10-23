@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Market } from "../types.ts";
-import { caught, close, hit, lay, lift, open, plant, Refused, type Dealt, type Exchange, type Held, type Order } from "./desk.ts";
+import { caught, close, closedBy, hit, lay, lift, open, plant, Refused, type Dealt, type Exchange, type Held, type Order } from "./desk.ts";
 
 const BTC: Market = { symbol: "BTC-USD", base: "BTC", tickSize: 1, stepSize: 0.00001, minNotional: 10, tiers: [] };
 
@@ -148,6 +148,23 @@ test("a position that's gone when banking was liquidated", async () => {
   const fill = await open(strike, call, 1);
   strike.held = null;
   assert.equal(await close(strike, { market: BTC, mark: 89_000, live: fill.live, feeRate: 0.0005, estimate: 0 }, 1), "gone");
+});
+
+test("a give-up Strike was slow over is read back from its closing order: a give-up at its fills, not a bust", async () => {
+  const strike = new FakeStrike();
+  const fill = await open(strike, call, 1);
+  assert.equal(await closedBy(strike, BTC.symbol, fill.live), null);
+  strike.price = 101_000;
+  await strike.market(BTC.symbol, "sell", "0.00500", `${fill.live}-x`, true);
+  assert.equal(strike.held, null);
+  const gave = await closedBy(strike, BTC.symbol, fill.live);
+  assert.ok(gave);
+  assert.equal(gave.price, 101_000);
+  assert.ok(Math.abs(gave.fee - 0.005 * 101_000 * 0.0005) < 1e-9);
+  const liquidated = new FakeStrike();
+  const other = await open(liquidated, call, 1);
+  liquidated.held = null;
+  assert.equal(await closedBy(liquidated, BTC.symbol, other.live), null);
 });
 
 const trap = { market: BTC, side: "long" as const, stake: 50, power: 10, price: 99_123.4, clientId: "tw-trap" };

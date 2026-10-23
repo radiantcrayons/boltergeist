@@ -891,8 +891,8 @@ function tuftSprite(A: number, variant: number) {
 // What dresses one tile of ground, worked out from where it is alone: whether a grove may stand there, and the tufts, flowers,
 // ferns and stones scattered on it, with what each becomes on open ground and what in a grove.
 type Look = [kind: number, variant: number];
-type Tile = { i: number; j: number; grove: boolean; outer: boolean; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
-type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean; outer: boolean };
+type Tile = { i: number; j: number; grove: boolean; outer: boolean; deep: boolean; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
+type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean; outer: boolean; deep: boolean };
 type Deco = { u: number; w: number; tile: Grove | null; plain: Sprite | null; wild: Sprite | null };
 const LOOKS = [tuftSprite, flowerSprite, fernSprite, cloverSprite, mushroomSprite, pebbleSprite];
 function tileAt(i: number, j: number): Tile {
@@ -921,9 +921,10 @@ function tileAt(i: number, j: number): Tile {
     const wild = look(0.5);
     if (plain || wild) items.push({ u: i + hash(i * 5 + j * 11 + t), w: j + hash(i * 13 + j * 7 + t), plain, wild });
   }
-  // Groves dot the whole field; the outer ones only grow away from the play, so the edges read as forest.
+  // Groves dot the whole field; the outer ones only grow away from the play, and the deep ones only far to the north and south,
+  // so the edges read as forest.
   const g = hash(i * 17 + j * 131);
-  return { i, j, grove: g < 0.024, outer: g < 0.075, ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
+  return { i, j, grove: g < 0.024, outer: g < 0.16, deep: g >= 0.075, ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
 }
 
 // A box on the screen in device pixels; boxes that touch are joined, so each part of the screen is laid down once.
@@ -1132,7 +1133,7 @@ export function Field(props: Props) {
           t = tileAt(i, j);
           known.set(id, t);
         }
-        const grove = t.outer ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false, outer: !t.grove } : null;
+        const grove = t.outer ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false, outer: !t.grove, deep: t.deep } : null;
         if (grove) groves.push(grove);
         for (const it of t.items) low.push({ u: it.u, w: it.w, tile: grove, plain: art(it.plain), wild: art(it.wild) });
       }
@@ -1159,7 +1160,7 @@ export function Field(props: Props) {
     const dpr = DPR;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    const last = candles.at(-1);
+    const last = candles[candles.length - 1];
     const target = mark ?? last?.c;
     // The sky only shows until there's a price: then the ground covers the whole view.
     if (target === undefined || !last) {
@@ -1417,6 +1418,16 @@ export function Field(props: Props) {
       if (id !== null) trodden.current.seen.set(id, on);
       return on;
     };
+    // The set prices, all on one column: a tree that would stand over one of them fades off it, so they always read.
+    const setRows = [y0 + 1.05, ...(yours.trap && !yours.call ? [yOf(yours.trap.price) + 0.95] : []), ...(yours.flag ? [yOf(yours.flag.price) + 0.95] : [])];
+    const setBoxes = setRows.map((yl) => {
+      const c = S(0, yl);
+      return { x0: c.x - 2.4 * A, x1: c.x + 2.4 * A, y0: c.y - 0.8 * A, y1: c.y + 0.8 * A };
+    });
+    const overSet = (x: number, y: number) => {
+      const b = S(x, y);
+      return setBoxes.some((r) => b.x + 0.8 * A > r.x0 && b.x - 0.8 * A < r.x1 && b.y > r.y0 && b.y - 2.8 * A < r.y1);
+    };
     const dec = groundFor(i0, i1, j0, j1, A, dpr);
     const fadeStep = clamp((at - fadeAt.current) / 320, 0, 1);
     fadeAt.current = at;
@@ -1427,7 +1438,7 @@ export function Field(props: Props) {
       const y = tile.j + 0.5 - g.cy + R / 2;
       if (!seen(S(x, y), 2.6 * A)) continue;
       const id = `${tile.i}|${tile.j}`;
-      const want = clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? 1 : 0;
+      const want = clear.every((yc) => Math.abs(yc - y) > 1) && !bare(x, y) ? (overSet(x, y) ? 0.12 : 1) : 0;
       const was = fades.current.get(id) ?? 0;
       const shown = was + (want - was) * fadeStep;
       if (shown < 0.01 && want === 0) {
@@ -1438,7 +1449,7 @@ export function Field(props: Props) {
       // Near the kids and the play around them everything tall goes faint, so the game is never hidden behind it; out past the
       // play the outer groves grow in.
       const d = Math.hypot(x + KIDS_BACK, y - y0);
-      const grown = tile.outer ? clamp((d - 6) / 1.5, 0, 1) : 1;
+      const grown = tile.deep ? clamp((Math.abs(y - y0) - 5) / 2, 0, 1) : tile.outer ? clamp((d - 6) / 1.5, 0, 1) : 1;
       if (grown <= 0) continue;
       tile.on = true;
       const faint = (0.15 + 0.85 * clamp((d - 3) / 3, 0, 1)) * grown * shown;
@@ -1856,7 +1867,7 @@ export function Field(props: Props) {
       if (!r.call) {
         for (const [j, gx] of [x - 0.24, x + 0.24].entries()) {
           const gy = ry + (j ? 0.12 : -0.12);
-          const stone = graveSprite(A, r.side, j + Math.floor(hash(gx * 3.1 + gy) * 4), scale * 1.2, r.hue);
+          const stone = graveSprite(A, r.side, j + Math.floor(hash([...r.id].reduce((h, ch) => h + ch.charCodeAt(0), 0) * 3.1) * 4), scale * 1.2, r.hue);
           casters.push({ x: gx, y: gy, shape: () => stone });
           shadows.push(() => {
             const p = S(gx, gy);

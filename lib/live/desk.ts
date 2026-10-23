@@ -203,6 +203,18 @@ export async function plant(ex: Exchange, flag: { market: Market; price: number;
   return { live: clientId, price };
 }
 
+// A give-up Strike was slow to show: whether the call's closing order filled after all, at what average price and for what fee.
+export async function closedBy(ex: Exchange, symbol: string, live: string): Promise<{ price: number; fee: number } | null> {
+  const o = await ex.order(symbol, `${live}-x`).catch(() => null);
+  if (!o || !filledOf(o)) return null;
+  const dealt = await ex.fills(symbol, o.ID).catch(() => [] as Dealt[]);
+  const size = dealt.reduce((sum, d) => sum + d.size, 0);
+  return {
+    price: size ? dealt.reduce((sum, d) => sum + d.price * d.size, 0) / size : Number(o.Price) || 0,
+    fee: dealt.reduce((sum, d) => sum + d.fee, 0),
+  };
+}
+
 // Whether a thundercloud has struck on Strike: all of it filled, at what price on average, and for what fee.
 export async function hit(ex: Exchange, symbol: string, clientId: string): Promise<{ price: number; at: number; fee?: number } | "gone" | null> {
   const o = await ex.order(symbol, clientId);

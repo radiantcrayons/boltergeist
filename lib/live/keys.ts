@@ -1,5 +1,6 @@
 import * as ed from "@noble/ed25519";
 import { REST } from "../strike.ts";
+import { uid } from "../uid.ts";
 
 // A trading key: its public half, and where this browser keeps the private half, which never leaves it as text.
 export type Keys = { public: string; id: string };
@@ -80,7 +81,7 @@ export function keepKeysIn(v: Vault, webCrypto?: boolean) {
 }
 
 export async function newKeys(): Promise<Keys> {
-  const id = crypto.randomUUID();
+  const id = uid();
   if (await webEd()) {
     const pair = (await crypto.subtle.generateKey(ED, false, ["sign", "verify"])) as CryptoKeyPair;
     const pub = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
@@ -103,7 +104,7 @@ export async function keysFrom(secretHex: string): Promise<Keys> {
   const wrapped = new Uint8Array(PKCS8.length + seed.length);
   wrapped.set(PKCS8);
   wrapped.set(seed, PKCS8.length);
-  const id = crypto.randomUUID();
+  const id = uid();
   try {
     const pub = hex(await ed.getPublicKeyAsync(seed));
     if (await webEd()) await store().put(id, { key: await crypto.subtle.importKey("pkcs8", wrapped, ED, false, ["sign"]) });
@@ -169,7 +170,7 @@ async function sha256(text: string): Promise<string> {
 // The headers that prove a request comes from the key's owner, for Strike or for anyone who passes them on to Strike.
 export async function signedHeaders(keys: Keys, method: "GET" | "POST" | "DELETE", path: string, text = ""): Promise<Record<string, string>> {
   const timestamp = String(Math.floor((Date.now() + (await serverOffset())) / 1000) - 1);
-  const nonce = crypto.randomUUID();
+  const nonce = uid();
   const message = `${method}:${path}:${timestamp}:${nonce}:${await sha256(text)}`;
   return {
     "X-API-Wallet-Public-Key": keys.public,
