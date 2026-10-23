@@ -115,7 +115,11 @@ export function Connect({ session, balance, onSession, onClose }: Props) {
                 className="apikey"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  void run("key", () => viaKey(key));
+                  void run("key", async () => {
+                    const s = await viaKey(key);
+                    setKey("");
+                    return s;
+                  });
                 }}
               >
                 <label>

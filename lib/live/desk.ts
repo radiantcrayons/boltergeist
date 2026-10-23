@@ -59,6 +59,21 @@ async function heldNow(ex: Exchange, symbol: string, waitMs: number): Promise<He
   return null;
 }
 
+// A market order Strike is slow to show as filled. Whatever is still resting comes off, and then what Strike holds is what happened: a
+// position on the call's side is the call, all of it or the part that filled. Only with nothing held does the call fail.
+async function landed(ex: Exchange, symbol: string, clientId: string, side: Side, waitMs: number): Promise<Held | null> {
+  try {
+    await filled(ex, symbol, clientId, waitMs);
+  } catch (err) {
+    if (err instanceof Refused) throw err;
+    await lift(ex, symbol, clientId, waitMs).catch(() => null);
+    const held = await heldNow(ex, symbol, waitMs).catch(() => null);
+    if (held?.side === side) return held;
+    throw err;
+  }
+  return heldNow(ex, symbol, waitMs);
+}
+
 async function ready(ex: Exchange, market: Market, power: number) {
   if (await ex.position(market.symbol)) throw new Refused(`You already hold a ${market.base} position: close it on Strike first`);
   await ex.marginMode(market.symbol, "isolated").catch(() => {});
@@ -74,10 +89,10 @@ export async function open(
   const size = sized(market, stake, power, mark);
   await ready(ex, market, power);
   await ex.market(market.symbol, side === "long" ? "buy" : "sell", size.toFixed(decimals(market.stepSize)), clientId, false);
-  await filled(ex, market.symbol, clientId, waitMs);
-  const held = await heldNow(ex, market.symbol, waitMs);
+  const held = await landed(ex, market.symbol, clientId, side, waitMs);
   const entry = held?.entry || mark;
-  return { entry, fee: size * entry * feeRate, koAt: held?.koAt || entry * (1 - (side === "long" ? 1 : -1) / power), live: clientId, size };
+  const got = held?.size || size;
+  return { entry, fee: got * entry * feeRate, koAt: held?.koAt || entry * (1 - (side === "long" ? 1 : -1) / power), live: clientId, size: got };
 }
 
 export async function close(
@@ -91,7 +106,14 @@ export async function close(
   const value = held.iso > 0 ? Math.max(0, held.iso + held.upnl - held.size * mark * feeRate) : estimate;
   const clientId = `${live}-x`;
   await ex.market(market.symbol, held.side === "long" ? "sell" : "buy", held.size.toFixed(decimals(market.stepSize)), clientId, true);
-  await filled(ex, market.symbol, clientId, waitMs);
+  try {
+    await filled(ex, market.symbol, clientId, waitMs);
+  } catch (err) {
+    // Slow to show as filled: banked if Strike no longer holds the position.
+    if (err instanceof Refused) throw err;
+    await lift(ex, market.symbol, clientId, waitMs).catch(() => null);
+    if (await ex.position(market.symbol).catch(() => held)) throw err;
+  }
   return { price: mark, value, made: held.upnl - held.size * mark * feeRate };
 }
 

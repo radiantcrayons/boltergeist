@@ -1,5 +1,5 @@
-import { NETWORK } from "../strike";
-import { hex, unhex } from "./keys";
+import { NETWORK } from "../strike.ts";
+import { hex, unhex } from "./keys.ts";
 
 export type Chain = "ethereum" | "solana" | "cardano";
 

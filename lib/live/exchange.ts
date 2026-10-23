@@ -1,5 +1,5 @@
-import { signed, StrikeError, type Keys } from "./keys";
-import type { Dealt, Exchange, Held, Order } from "./desk";
+import { signed, StrikeError, type Keys } from "./keys.ts";
+import type { Dealt, Exchange, Held, Order } from "./desk.ts";
 
 type RawPosition = { symbol: string; size: string; entry_price: string; liquidation_price?: string; iso_balance?: string; upnl?: string };
 type RawFill = { price: string; size: string; fee: string; role: string; timestamp: number };

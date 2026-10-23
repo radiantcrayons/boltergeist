@@ -1,6 +1,6 @@
-import { NETWORK } from "../strike";
-import { keysFrom, newKeys, post, signed, StrikeError, type Keys } from "./keys";
-import { connect, type Chain, type Wallet } from "./wallets";
+import { NETWORK } from "../strike.ts";
+import { forget, keysFrom, newKeys, post, signed, StrikeError, type Keys } from "./keys.ts";
+import { connect, type Chain, type Wallet } from "./wallets.ts";
 
 export const BUILDER = {
   code: process.env.NEXT_PUBLIC_BUILDER_CODE ?? "",
@@ -24,21 +24,34 @@ const KEY = `tradewars.session.${NETWORK}`;
 // A pasted API key never expires on Strike, so this browser forgets it after a while.
 const KEY_TTL = 12 * 60 * 60 * 1000;
 
+const read = () => JSON.parse(localStorage.getItem(KEY) ?? "null") as (Session & { keys?: Partial<Keys> & { secret?: string } }) | null;
+
+// Only the public half of the key and where it's kept are saved here. A session saved the old way, with its key as text, is wiped.
 export function loadSession(): Session | null {
   try {
-    const kept = JSON.parse(localStorage.getItem(KEY) ?? "null") as Session | null;
-    if (!kept?.keys?.secret || kept.network !== NETWORK) return null;
-    if (kept.via === "key" && !kept.expiresAt) return null;
-    if (kept.expiresAt && kept.expiresAt < Date.now()) return null;
-    return kept;
+    const kept = read();
+    if (!kept) return null;
+    const stale =
+      !kept.keys?.id ||
+      "secret" in kept.keys ||
+      kept.network !== NETWORK ||
+      (kept.via === "key" && !kept.expiresAt) ||
+      (!!kept.expiresAt && kept.expiresAt < Date.now());
+    if (!stale) return kept;
+    localStorage.removeItem(KEY);
+    void forget(kept.keys);
+    return null;
   } catch {
     return null;
   }
 }
 
+// Saving another session, or none, also throws away the key the last one used.
 export function saveSession(session: Session | null) {
   try {
-    if (session) localStorage.setItem(KEY, JSON.stringify(session));
+    const before = read();
+    if (before?.keys?.id && before.keys.id !== session?.keys.id) void forget(before.keys);
+    if (session) localStorage.setItem(KEY, JSON.stringify({ ...session, keys: { public: session.keys.public, id: session.keys.id } }));
     else localStorage.removeItem(KEY);
   } catch {}
 }
@@ -47,6 +60,15 @@ export async function viaWallet(wallet: Wallet): Promise<Session> {
   if (!BUILDER.code) throw new Error("Wallet sign-in isn't set up here yet: use an API key");
   const connected = await connect(wallet);
   const keys = await newKeys();
+  try {
+    return await linked(wallet, connected, keys);
+  } catch (err) {
+    void forget(keys);
+    throw err;
+  }
+}
+
+async function linked(wallet: Wallet, connected: Awaited<ReturnType<typeof connect>>, keys: Keys): Promise<Session> {
   const challenge = await post<{ nonce: string; message_to_sign: string }>("/auth/builder/request-signature", {
     address: connected.address,
     chain: wallet.chain,
@@ -76,6 +98,7 @@ export async function viaWallet(wallet: Wallet): Promise<Session> {
 export async function viaKey(secretHex: string): Promise<Session> {
   const keys = await keysFrom(secretHex);
   const account = await signed<{ account_id: string; blockchain_address?: string | null; blockchain?: string }>(keys, "GET", "/v2/account").catch((err) => {
+    void forget(keys);
     throw err instanceof StrikeError && err.status === 401 ? new Error(`Strike doesn't know that key on ${NETWORK}: register its public key on Strike's API wallets page`) : err;
   });
   return {

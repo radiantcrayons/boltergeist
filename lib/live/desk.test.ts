@@ -15,6 +15,8 @@ class FakeStrike implements Exchange {
   dealt = new Map<number, Dealt[]>();
   held: Held | null = null;
   ids = 0;
+  // How Strike shows a market order: as it is, still open after it filled, or not at all.
+  lag: "slow" | "hidden" | null = null;
 
   async marginMode(symbol: string, mode: string) {
     this.sent.push(`marginMode ${symbol} ${mode}`);
@@ -26,6 +28,7 @@ class FakeStrike implements Exchange {
     this.sent.push(`market ${symbol} ${side} ${size}${reduceOnly ? " reduce-only" : ""}`);
     const o = this.add(clientId, side, Number(size), this.price, reduceOnly, this.status);
     if (this.status === "filled") this.fill(o, this.price, false);
+    if (this.lag === "slow") o.Status = "open";
   }
   async limit(symbol: string, side: "buy" | "sell", size: string, price: string, clientId: string, opts: { postOnly?: boolean; reduceOnly?: boolean }) {
     this.sent.push(`limit ${symbol} ${side} ${size} at ${price}${opts.postOnly ? " post-only" : ""}${opts.reduceOnly ? " reduce-only" : ""}`);
@@ -39,6 +42,7 @@ class FakeStrike implements Exchange {
     for (const o of this.orders.values()) if (o.ID === orderId && o.Status === "open") o.Status = "canceled";
   }
   async order(_symbol: string, clientId: string) {
+    if (this.lag === "hidden") return null;
     const o = this.orders.get(clientId);
     return o ? { ...o } : null;
   }
@@ -93,6 +97,37 @@ test("an order Strike rejects is reported, not taken for a fill", async () => {
   const strike = new FakeStrike();
   strike.status = "rejected";
   await assert.rejects(open(strike, call, 1), /rejected/);
+});
+
+test("a call Strike is slow to show as filled is still what Strike holds: in at its entry, not lost", async () => {
+  for (const lag of ["slow", "hidden"] as const) {
+    const strike = new FakeStrike();
+    strike.lag = lag;
+    const fill = await open(strike, call, 1);
+    assert.equal(fill.entry, 100_000);
+    assert.equal(fill.size, 0.005);
+    assert.equal(fill.koAt, 90_000);
+    assert.equal(fill.live, "tw-1");
+    assert.ok(strike.held);
+  }
+});
+
+test("a market order that never fills is taken off, and with nothing held the call fails", async () => {
+  const strike = new FakeStrike();
+  strike.status = "open";
+  await assert.rejects(open(strike, call, 1), /hasn't filled/);
+  assert.equal(strike.sent.at(-1), "cancel 1");
+  assert.equal(strike.orders.get("tw-1")!.Status, "canceled");
+  assert.equal(strike.held, null);
+});
+
+test("a bank Strike is slow to show as filled has banked once the position is gone", async () => {
+  const strike = new FakeStrike();
+  const fill = await open(strike, call, 1);
+  strike.lag = "slow";
+  const out = await close(strike, { market: BTC, mark: 101_000, live: fill.live, feeRate: 0.0005, estimate: 0 }, 1);
+  assert.notEqual(out, "gone");
+  assert.equal(strike.held, null);
 });
 
 test("banking closes reduce-only and comes out with Strike's margin and profit, less the fee", async () => {
