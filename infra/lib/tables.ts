@@ -3,7 +3,7 @@ import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import { Construct } from "constructs";
 
 /**
- * The arenas: each fight's players and moves under one partition key, gone a day after the fight
+ * The games: each haunt's players and moves under one partition key, gone a day after the haunt
  * ends (expiresAt). Paid per request, with a ceiling on each table: past it requests are throttled
  * rather than charged, and boltergeist-arenas-throttled emails.
  *

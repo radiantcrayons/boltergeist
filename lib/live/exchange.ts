@@ -17,7 +17,7 @@ export function strike(keys: Keys, feeBps: number): Exchange {
         { symbol, side, type: "market", size, client_order_id: clientId, slippage: "0.01", ...(reduceOnly && { reduce_only: true }) },
         feeBps > 0 ? { "X-Builder-Fee-Bps": String(feeBps) } : undefined,
       ),
-    // Traps and flags are maker orders, so they carry no builder fee.
+    // Graves and thunderclouds are maker orders, so they carry no builder fee.
     limit: (symbol, side, size, price, clientId, opts) =>
       signed(keys, "POST", "/v2/order", {
         symbol,

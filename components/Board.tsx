@@ -24,7 +24,7 @@ const kOf = (scale: string) => (scale === "none" ? 1 : parseFloat(scale) || 1);
 const arrows = (text: string) => text.split(/([▲▼])/).map((bit, i) => (i % 2 ? <b key={i} className={s.arrow}>{bit}</b> : bit));
 
 function stateOf(f: Fighter, ready: boolean): [string, Tone] {
-  if (f.out) return f.out.by === "ko" ? ["K.O.", "ko"] : ["zapped", "zap"];
+  if (f.out) return f.out.by === "ko" ? ["K.O.", "ko"] : ["banished", "zap"];
   if (f.call) return [`${f.call.side === "long" ? "▲" : "▼"} ${f.call.power}x`, f.call.side];
   if (f.trap) return f.trap.side === "long" ? ["graves ▲", "ambushLong"] : ["graves ▼", "ambushShort"];
   return ready ? ["ready", "ready"] : ["idle", "idle"];
@@ -134,7 +134,7 @@ export function Board({ game, round, waiting }: Props) {
   );
 }
 
-// One fighter. It pulses as they spring into a call, flashes and dims when they go out, and shines as you climb or someone takes the lead.
+// One player. It pulses as they spring into a call, flashes and dims when they go out, and shines as you climb or someone takes the lead.
 const Panel = memo(function Panel({ id, place, name, role, bot, live, you, text, tone, g, title }: Seat) {
   const card = useRef<HTMLDivElement>(null);
   const ring = useRef<HTMLElement>(null);

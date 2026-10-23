@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import * as fmt from "@/lib/format";
 import { loadTicks, saveTicks, withTick, type Tick } from "@/lib/game/ticks";
 import { useWar } from "@/lib/game/useWar";
-import { YOU, type Kind, type Role } from "@/lib/game/war";
+import { YOU, type Game, type Kind, type Role } from "@/lib/game/war";
 import { balance as fetchBalance, loadSession, saveSession, type Balance, type Session } from "@/lib/live/session";
 import { play, setHaunting, setSound } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
@@ -14,6 +14,12 @@ import { Arena } from "./Arena";
 import { Logo } from "./art/Effects";
 import { Base } from "./Base";
 import { Connect } from "./Connect";
+
+// Whether you have graves resting or a position open on Strike in a game that's still running.
+const outOnStrike = (g: Game | null) => {
+  const me = g && g.live && !g.over ? g.fighters.find((f) => f.id === YOU) : undefined;
+  return !!(me?.call?.live || me?.trap?.live);
+};
 
 export default function App() {
   const [markets, setMarkets] = useState<Market[] | null>(null);
@@ -102,6 +108,31 @@ export default function App() {
     if (inGame) setHaunting(true);
     else if (!war.joining) setHaunting(false);
   }, [inGame, war.joining]);
+  // Leaving a game with graves or a position on Strike asks first; closing the tab then makes the browser ask too.
+  const [leaving, setLeaving] = useState(false);
+  const leave = () => {
+    setLeaving(false);
+    war.dismiss();
+    setOpen(null);
+  };
+  const tryLeave = () => (outOnStrike(game) ? setLeaving(true) : leave());
+  const abandon = () => {
+    const me = game?.fighters.find((f) => f.id === YOU);
+    if (game && me?.call) war.bank(game.id);
+    else if (game && me?.trap) war.pull(game.id);
+    leave();
+  };
+  const anyOut = games.some(outOnStrike);
+  useEffect(() => {
+    if (!anyOut) return;
+    const hold = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    addEventListener("beforeunload", hold);
+    return () => removeEventListener("beforeunload", hold);
+  }, [anyOut]);
+
   const shown = game?.symbol ?? symbol;
   const market = markets?.find((m) => m.symbol === shown);
   const goingLive = live && !!session;
@@ -116,7 +147,7 @@ export default function App() {
   return (
     <div className="app">
       <header className="top">
-        <button className="logo" onClick={() => setOpen(null)} title="Back to the start">
+        <button className="logo" onClick={tryLeave} title="Back to the start">
           <Logo className="mark" />
           <span>
             bolt<b>ergeist</b>
@@ -167,7 +198,11 @@ export default function App() {
           war={war}
           scenes={false}
           onAgain={() => enter(game.kind, game.fighters.find((f) => f.id === YOU)!.role, !!game.live && !!session)}
-          onLeave={() => setOpen(null)}
+          leaving={leaving}
+          onLeave={tryLeave}
+          onKeep={leave}
+          onAbandon={abandon}
+          onStay={() => setLeaving(false)}
         />
       ) : (
         <Base

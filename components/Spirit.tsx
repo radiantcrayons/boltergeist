@@ -84,7 +84,7 @@ function mist(g: CanvasRenderingContext2D, w: number, h: number, t: number, fron
   }
 }
 
-// A clay ghost on a canvas, as big as its stake next to the others, swaying. It throws its arms up to attack and fades when hurt. In a
+// A clay ghost on a canvas, as big as its stake next to the others, swaying. It throws its arms up to spook and fades when hurt. In a
 // scene it floats in drifting mist and turns round, through each of the angles it is drawn at; set spinning, it just turns.
 export function Spirit({ role, mood = "ready", className, scene = false, spin = false }: { role: Role; mood?: Mood; className?: string; scene?: boolean; spin?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);

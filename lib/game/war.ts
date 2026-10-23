@@ -2,7 +2,7 @@ export type Kind = "skirmish" | "battle" | "war";
 export type Role = "soldier" | "commando" | "warlord";
 export type Side = "long" | "short";
 
-// A new fight of each kind starts every `every`, and its doors stay open for the first `doors` of it.
+// A new haunt of each kind starts every `every`, and its doors stay open for the first `doors` of it.
 // `reach` is how far from the price a trap usually sits.
 export const KINDS: Record<Kind, { name: string; ms: number; every: number; doors: number; length: string; candles: "5s" | "1m" | "15m"; candleMs: number; floors: number[]; reach: number }> = {
   skirmish: { name: "Jump Scare", ms: 10 * 60_000, every: 2 * 60_000, doors: 30_000, length: "10 minutes", candles: "5s", candleMs: 5_000, floors: [2, 4, 7, 12, 20], reach: 0.00025 },
@@ -18,7 +18,7 @@ export const ROLES: Record<Role, { name: string; hero: string; stake: number }> 
 
 export const TOP_STAKE = Math.max(...Object.values(ROLES).map((r) => r.stake));
 
-// Every fight runs on a market the arena picks, so everyone in it is on the same chart. Skirmishes get the ones that move most in a minute.
+// Every haunt runs on a market the game picks, so everyone in it is on the same chart. Jump Scares get the ones that move most in a minute.
 const ROTATION: Record<Kind, string[]> = {
   skirmish: ["ETH-USD", "SOL-USD", "XRP-USD", "HYPE-USD", "DOGE-USD", "ADA-USD", "ZEC-USD"],
   battle: ["BTC-USD", "ETH-USD", "SOL-USD", "XAU-USD", "HYPE-USD", "NVDA-USD", "XRP-USD", "SP500-USD", "DOGE-USD", "TSLA-USD", "ADA-USD", "NAS100-USD"],
@@ -52,11 +52,11 @@ export type Call = {
   size?: number;
   maker?: boolean;
   flag?: number;
-  // A live flag's order on Strike.
+  // A live thundercloud's order on Strike.
   flagOrder?: string;
 };
 
-// A maker order waiting below the price (long) or above it (short), with an optional flag to bank at once it springs.
+// A maker order waiting below the price (long) or above it (short), with an optional thundercloud to cash in at once it springs.
 // A live one is an order on Strike, and springs when Strike fills it rather than by the price here.
 export type Trap = { side: Side; power: number; price: number; at: number; flag?: number; live?: string; size?: number };
 
@@ -92,14 +92,14 @@ export type Fighter = {
   // The rounds fought in: in a position at some point in them, one bit each.
   fought: number;
   crits: number;
-  // Notional filled as a maker: what this fighter added to Strike's book.
+  // Notional filled as a maker: what this player added to Strike's book.
   liquidity?: number;
   joinedAt?: number;
   live?: boolean;
   nerve?: { power: number; nextAt: number; seed: number };
 };
 
-// Another player in the arena, and what they do there.
+// Another player in the game, and what they do there.
 export type Player = { id: string; name: string; role: Role; joinedAt: number; live?: boolean };
 export type Move = {
   at: number;
@@ -114,10 +114,10 @@ export type Move = {
   value?: number;
   flag?: number;
   live?: boolean;
-  // The arena's own name for a move, to tell one already seen from a new one.
+  // The game server's own name for a move, to tell one already seen from a new one.
   id?: string;
 };
-// `bell` is the price the game ended at, as the arena took it; `next` is where the next look picks up from.
+// `bell` is the price the game ended at, as the game server took it; `next` is where the next look picks up from.
 export type Log = { players: Player[]; moves: Move[]; bell?: number; next?: string };
 
 export type Event = {
@@ -133,7 +133,7 @@ export type Event = {
   crit?: boolean;
   idle?: boolean;
   price?: number;
-  // In by a trap, or out at a flag: as a maker.
+  // In by a trap, or out at a thundercloud: as a maker.
   maker?: boolean;
 };
 
@@ -152,7 +152,7 @@ export type Game = {
   at: number;
   over: boolean;
   feed: Event[];
-  // Playing online: who you are in the arena, and how many of its moves are in.
+  // Playing online: who you are in the game, and how many of its moves are in.
   me?: string;
   seen?: number;
   bell?: number;
@@ -201,7 +201,7 @@ const dir = (side: Side) => (side === "long" ? 1 : -1);
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
 const between = (lo: number, hi: number, random: () => number) => lo + (hi - lo) * random();
 
-// Seeded randomness, so every player in an arena sees the same rivals do the same things.
+// Seeded randomness, so every player in a game sees the same rivals do the same things.
 const hash = (s: string) => {
   let h = 2166136261;
   for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
@@ -235,7 +235,7 @@ const arenaFrom = (kind: Kind, startsAt: number, symbols: string[], shard = 0): 
 export const shardOf = (a: Arena, shard: number, symbols: string[]): Arena => arenaFrom(a.kind, a.startsAt, symbols, shard);
 export const sameGame = (x: string, y: string) => x.split("-").slice(0, 2).join("-") === y.split("-").slice(0, 2).join("-");
 
-// The one arena of a kind to join: the running one while its doors are open, then the next. On the market whose turn it is.
+// The one game of a kind to join: the running one while its doors are open, then the next. On the market whose turn it is.
 export function arenaAt(kind: Kind, now: number, symbols: string[]): Arena {
   const { every, doors } = KINDS[kind];
   const last = Math.floor(now / every);
@@ -253,7 +253,7 @@ export function arenaOf(id: string, symbols: string[]): Arena | null {
 
 export const doorsOpen = (a: Arena, now: number) => now >= a.opensAt && now < a.startsAt + KINDS[a.kind].doors;
 
-// The rivals who fill an arena's seats, and when each of them walks in.
+// The rivals who fill a game's seats, and when each of them walks in.
 export function lineup(a: Pick<Arena, "id" | "kind" | "startsAt">): { joinsAt: number; fighter: Fighter }[] {
   const random = seeded(hash(a.id));
   const { every, doors, ms } = KINDS[a.kind];
@@ -307,7 +307,7 @@ export function valueOf(c: Call, price: number, rate = STRIKE.taker): number {
   return Math.max(0, c.stake - c.fee + moveOf(c, price) - size * price * rate);
 }
 
-// The price a call has to pass for banking it at the market to come out ahead, fees and all.
+// The price a call has to pass for giving it up at the market to come out ahead, fees and all.
 export function breakEven(c: Call, rate = STRIKE.taker): number {
   const size = (c.stake * c.power) / c.entry;
   const d = dir(c.side);
@@ -319,13 +319,13 @@ export const hurdle = (rateIn: number, rateOut: number) => (rateIn + rateOut) / 
 
 export const koDistance = (c: Pick<Call, "entry" | "koAt">) => Math.abs(c.entry - c.koAt) / c.entry;
 
-// What a fighter has, as Strike shows equity: the fee in already paid, and a call's move so far.
+// What a player has, as Strike shows equity: the fee in already paid, and a call's move so far.
 export const worth = (f: Fighter, price: number) => f.cash + (f.call ? valueOf(f.call, price, 0) : 0);
 
-// What everyone is ranked on: how far their stake has come, so every hero fights on the same board.
+// What everyone is ranked on: how far their stake has come, so every ghost haunts on the same board.
 export const gain = (f: Fighter, price: number) => worth(f, price) / f.stake - 1;
 
-// A critical hit: banked near the best price the call saw, for a good profit.
+// A critical hit: cashed in near the best price the call saw, for a good profit.
 const critAt = (c: Call, price: number, made: number) => {
   const move = dir(c.side) * (c.best - c.entry);
   return made > c.stake * 0.1 && move > 0 && dir(c.side) * (price - c.entry) >= move * 0.85;
@@ -387,7 +387,7 @@ function seat(game: Game, fighters: Fighter[], t: number, events: Event[]): Figh
   return [...people, ...due.map((b) => had.get(b.id) ?? b)];
 }
 
-// What the other players in the arena did, up to a time: who came in, and their moves in order.
+// What the other players in the game did, up to a time: who came in, and their moves in order.
 export function heed(game: Game, log: Log, until: number): Game {
   if (!game.me) return game;
   const events: Event[] = [];
@@ -405,9 +405,9 @@ export function heed(game: Game, log: Log, until: number): Game {
   return seen === g.seen ? g : { ...g, seen };
 }
 
-// Another player's move, as the arena took it. Their traps and flags spring here by the price, as everyone's do;
-// the fills and banks they say they had only land if the price here hasn't sprung them already. A live call
-// lands at the arena's price like any other: what Strike says about it is only theirs to see.
+// Another player's move, as the game server took it. Their graves and thunderclouds spring here by the price, as everyone's do;
+// the fills and exits they say they had only land if the price here hasn't sprung them already. A live call
+// lands at the game's price like any other: what Strike says about it is only theirs to see.
 export function move(game: Game, m: Move): Game {
   const f = game.fighters.find((x) => x.id === m.who);
   if (!f || f.id === YOU || f.out || game.over || m.at > game.endsAt) return game;
@@ -467,7 +467,7 @@ export function trapped(game: Game, fill: Fill, at: number): Game {
   return withYou(game, { ...f, call: { ...f.call!, fee: fill.fee, koAt: fill.koAt || f.call!.koAt, live: fill.live, size: fill.size } }, events[0]);
 }
 
-// Your live flag filled on Strike, at the price and fee it filled at.
+// Your live thundercloud filled on Strike, at the price and fee it filled at.
 export function flagHit(game: Game, at: number, price: number, fee?: number): Game {
   const me = you(game);
   if (game.over || !me.call?.flagOrder) return game;
@@ -475,7 +475,7 @@ export function flagHit(game: Game, at: number, price: number, fee?: number): Ga
   return withYou(game, flagged(game, me, price, at, events, fee), events[0]);
 }
 
-// A flag banking a call at its price, as a maker.
+// A thundercloud cashing in a call at its price, as a maker.
 function flagged(game: Game, f: Fighter, price: number, t: number, events: Event[], fee?: number): Fighter {
   const c = f.call!;
   const cash = fee === undefined ? valueOf(c, price, STRIKE.maker) : Math.max(0, valueOf(c, price, 0) - fee);
@@ -485,7 +485,7 @@ function flagged(game: Game, f: Fighter, price: number, t: number, events: Event
   return { ...f, cash, call: null, crits: f.crits + (crit ? 1 : 0), fought: held(game, f, t), liquidity: (f.liquidity ?? 0) + ((c.stake * c.power) / c.entry) * price };
 }
 
-// Traps spring and flags bank when the price trades through them, not when it only touches.
+// Graves spring and thunderclouds strike when the price trades through them, not when it only touches.
 const through = (side: Side, at: number, bar: { h: number; l: number }) => (side === "long" ? bar.l < at : bar.h > at);
 const beyond = (side: Side, a: number, b: number) => (side === "long" ? a > b : a < b);
 
@@ -502,7 +502,7 @@ export function canCall(game: Game, power: number, now: number): boolean {
   return !game.over && started(game, now) && now < game.endsAt && !me.out && !me.call && me.cash > 0 && power >= leastPower(game, me, now) && power <= rulesOf(game).maxPower;
 }
 
-// Charging: in at the price now, as a taker.
+// Swooping in: in at the price now, as a taker.
 export function call(game: Game, side: Side, power: number, now: number, fill?: Partial<Fill> & { entry: number }): Game {
   const me = you(game);
   const p = Math.round(power);
@@ -527,7 +527,7 @@ export function setTrap(game: Game, side: Side, power: number, price: number, no
 
 export const pullTrap = (game: Game): Game => (you(game).trap ? withYou(game, { ...you(game), trap: null }, null) : game);
 
-// A flag is where a call banks as a maker: past the price for a call, past the trap for a trap.
+// A thundercloud is where a call cashes in as a maker: past the price for a call, past the trap for a trap.
 export function canFlag(game: Game, price: number, now: number): boolean {
   const me = you(game);
   if (game.over || me.out || now >= game.endsAt || price <= 0) return false;
@@ -622,7 +622,7 @@ function act(f: Fighter, game: Game, price: number, t: number): { fighter: Fight
   const up = price >= game.price;
   const side: Side = random() < 0.6 === up ? "long" : "short";
   const power = clamp(Math.round(f.nerve!.power * between(0.6, 1.4, random)), least, most);
-  // Most lay an ambush near the price and wait; now and then one charges in and pays the fee.
+  // Most dig graves near the price and wait; now and then one swoops in and pays the fee.
   if (random() < 0.12) {
     return {
       fighter: { ...f, cash: 0, trap: null, call: opening(side, power, price, f.cash, t, rulesOf(game).tiers), fought: fights(game, f, t), nerve: nerve(t + round * between(0.2, 0.9, random)) },

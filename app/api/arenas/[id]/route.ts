@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
 import { act, arena, join, log, online, Refused } from "@/lib/server/arenas";
 
-const OFFLINE = () => Response.json({ error: "The arena is offline" }, { status: 503 });
+const OFFLINE = () => Response.json({ error: "The game is offline" }, { status: 503 });
 const failed = (err: unknown) => {
   if (err instanceof Refused) return Response.json({ error: err.message }, { status: err.status });
-  console.error("arena", err);
+  console.error("game", err);
   return Response.json({ error: "Something went wrong" }, { status: 500 });
 };
 

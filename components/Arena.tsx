@@ -50,9 +50,14 @@ type Props = {
   scenes: boolean;
   onAgain: () => void;
   onLeave: () => void;
+  // Asked before leaving with graves or a position on Strike: keep it running, give it up, or stay.
+  leaving: boolean;
+  onKeep: () => void;
+  onAbandon: () => void;
+  onStay: () => void;
 };
 
-export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLeave }: Props) {
+export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLeave, leaving, onKeep, onAbandon, onStay }: Props) {
   const kind = KINDS[game.kind];
   const me = game.fighters.find((f) => f.id === YOU)!;
   const role = ROLES[me.role];
@@ -64,7 +69,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   }, []);
   const [fear, setFear] = useState(() => Math.min(2, Math.max(0, Math.round(recall("fear", 1)))));
   useEffect(() => remember("fear", fear), [fear]);
-  // A fight opens at the top, with the field in view, wherever the base was scrolled to.
+  // A haunt opens at the top, with the field in view, wherever the start page was scrolled to.
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [game.id]);
@@ -114,7 +119,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         if (e.who === "you") play("earth");
       } else if (e.what === "end") {
         const p = placeOf(game, YOU);
-        if (me.out) say({ title: me.out.by === "ko" ? "knocked out" : "zapped", detail: `${fmt.ordinal(p)} of ${game.fighters.length}`, tone: "bad" }, "out");
+        if (me.out) say({ title: me.out.by === "ko" ? "knocked out" : "banished", detail: `${fmt.ordinal(p)} of ${game.fighters.length}`, tone: "bad" }, "out");
         else if (p === 1) say({ title: "champion!", detail: fmt.money(made, true), tone: "good", scene: scene({ kind: "victory", you: [hpNow, hpNow], them: [10, 0], title: "champion!", detail: fmt.money(made, true) }) }, "win");
         else
           say(
@@ -126,7 +131,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
       } else if (e.what === "ko") {
         say({ title: "K.O.!", detail: `${e.power}x was too much power`, tone: "bad", scene: scene({ kind: "ko", side: e.side, you: [10, 0], them: [10, 10], title: "K.O.!", detail: `${e.power}x was too much power` }) }, "lose");
       } else if (e.what === "zap") {
-        const title = "zapped!";
+        const title = "banished!";
         const detail = e.idle ? "no call this round" : "weakest still standing";
         say({ title, detail, tone: "bad", scene: scene({ kind: "zap", you: [hpNow, hpNow], them: [10, 10], title, detail }) }, "zap");
       } else if (e.what === "bank") {
@@ -167,7 +172,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   }, [nowMs, waiting, game.startsAt, game.endsAt, game.over]);
 
   const can = !game.over && !me.out && !war.busy;
-  // Banking at the market carries the builder fee, if there is one; ambushes and flags don't.
+  // Giving up at the market carries the builder fee, if there is one; graves and thunderclouds don't.
   const taker = STRIKE.taker + (game.live ? BUILDER.feeBps / 10_000 : 0);
   const bankFee = me.call ? valueOf(me.call, game.price, 0) - valueOf(me.call, game.price, taker) : 0;
   // What giving up the ghost leaves you with right now: the move, less the fee in and the fee for closing at the market.
@@ -175,7 +180,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const even = me.call ? breakEven(me.call, taker) : 0;
   const trap = me.trap ?? null;
   const flag = me.call?.flag ?? trap?.flag;
-  // Strike's order book, order by order: where your ambush and your flag would stand in its line.
+  // Strike's order book, order by order: where your graves and your thundercloud would stand in its line.
   const l3 = useBook(game.symbol);
   const trapSide = trap?.side;
   const trapPrice = trap?.price;
@@ -185,7 +190,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const inLine = useMemo(() => {
     if (!l3.book || !trapSide || trapPrice === undefined || trapAt === undefined) return null;
     const place = join(l3.book, BOOK_SIDE[trapSide], bookKey(trapPrice, tickSize));
-    // A live ambush is already on Strike by the time it's laid here: the last order in its line of its size is yours, not ahead of you.
+    // Live graves are already on Strike by the time they're dug here: the last order in their line of their size is yours, not ahead of you.
     const last = l3.book[place.side].get(place.price)?.at(-1);
     if (trapSize && last && Math.abs(last.size - trapSize) <= trapSize * 0.01) place.ahead.delete(last.id);
     return place;
@@ -224,7 +229,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     const p = onTick(raw);
     if (me.call) {
       if (side === me.call.side) return null;
-      return { p, label: `banks ${fmt.money(valueOf(me.call, p, STRIKE.maker) - me.call.stake, true)}`, color: COLORS.volt, art: "cloud" };
+      return { p, label: `pays ${fmt.money(valueOf(me.call, p, STRIKE.maker) - me.call.stake, true)}`, color: COLORS.volt, art: "cloud" };
     }
     if (trap && side !== trap.side) return { p, label: "", color: COLORS.volt, art: "cloud" };
     if (least > most) return null;
@@ -335,6 +340,25 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             </div>
           ))}
         {game.over && !moment && <Debrief game={game} onAgain={onAgain} onLeave={onLeave} />}
+        {leaving && (
+          <div className="leave" role="dialog" aria-label="Leave the game">
+            <button className="close" onClick={onStay} aria-label="Stay in the game">
+              &times;
+            </button>
+            <b>your ghosts are still out on Strike</b>
+            <p>
+              {me.call ? `Your ${me.call.side} position is open on Strike.` : "Your graves are resting on Strike as real orders."} Keep haunting and the game carries on, then takes everything off Strike at the final bell, as long as this tab stays open.
+            </p>
+            <div className="choices">
+              <button className="plain" onClick={onKeep}>
+                keep haunting
+              </button>
+              <button className="big" onClick={onAbandon}>
+                {me.call ? "give up the ghost and leave" : "fill in the graves and leave"}
+              </button>
+            </div>
+          </div>
+        )}
         {war.error && (
           <p key={war.error} className="toast" role="alert">
             {war.error}
@@ -375,7 +399,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         <div className="orders">
           {me.out ? (
             <div className="out">
-              <b>{me.out.by === "ko" ? "you were knocked out" : "you were zapped"}</b>
+              <b>{me.out.by === "ko" ? "you were knocked out" : "you were banished"}</b>
               <span className="dim">{game.over ? "" : "watch the rest, or"}</span>
               <button className="plain" onClick={onAgain}>
                 haunt again
@@ -427,7 +451,7 @@ function Debrief({ game, onAgain, onLeave }: { game: Game; onAgain: () => void; 
     <div className="debrief" role="dialog" aria-label="The result">
       <Spirit role={me.role} mood={place === 1 ? "happy" : me.out ? "ko" : made >= 0 ? "happy" : "hurt"} className="portrait" />
       <div>
-        <h2>{me.out ? (me.out.by === "ko" ? "knocked out" : "zapped") : place === 1 ? "champion!" : `${fmt.ordinal(place)} place`}</h2>
+        <h2>{me.out ? (me.out.by === "ko" ? "knocked out" : "banished") : place === 1 ? "champion!" : `${fmt.ordinal(place)} place`}</h2>
         <p>
           {fmt.money(me.stake)} &rarr; <b>{fmt.money(value)}</b>{" "}
           <span className={made > 0 ? "good" : made < 0 ? "bad" : "dim"}>

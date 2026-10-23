@@ -183,7 +183,7 @@ h2 {
   border-color: var(--mint-deep);
 }
 
-/* Base */
+/* The start page */
 
 .base {
   width: min(1120px, 100%);
@@ -506,7 +506,7 @@ h2 {
   cursor: pointer;
 }
 
-/* Arena */
+/* The game screen */
 
 .arena {
   flex: 1;
@@ -523,7 +523,7 @@ h2 {
 }
 
 
-/* The market and the round, in the field's top left corner, with the way back to base. */
+/* The market and the round, in the field's top left corner, with the way back to the start. */
 .corner {
   position: absolute;
   top: 12px;
@@ -1099,6 +1099,58 @@ h2 {
   pointer-events: none;
   transform: translateX(-50%);
   animation: toast 9s ease-out both;
+}
+
+/* Asked on the way out while graves or a position are live on Strike. */
+.leave {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 7;
+  width: min(440px, calc(100% - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 2px solid var(--mint);
+  border-radius: 14px;
+  box-shadow: var(--pop);
+  transform: translate(-50%, -50%);
+}
+
+.leave b {
+  font: 20px var(--display), sans-serif;
+  text-transform: uppercase;
+}
+
+.leave p {
+  margin: 0;
+  color: var(--soft);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.leave .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.leave .choices button {
+  padding: 8px 14px;
+  font-size: 15px;
+}
+
+.leave .close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: 0;
+  color: var(--dim);
+  font-size: 22px;
+  cursor: pointer;
 }
 
 @keyframes toast {

@@ -10,7 +10,7 @@ const brand = Rubik_Wet_Paint({ variable: "--brand", weight: "400", subsets: ["l
 
 export const metadata: Metadata = {
   title: "Boltergeist",
-  description: "Haunt the market on Strike's live prices. Pick a ghost, dig your graves long or short, and bank when lightning strikes.",
+  description: "Haunt the market on Strike's live prices. Pick a ghost, dig your graves long or short, and cash in when lightning strikes.",
 };
 
 export const viewport: Viewport = { themeColor: "#06080b" };

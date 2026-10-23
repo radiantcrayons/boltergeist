@@ -11,7 +11,7 @@ with. Let the kids walk far enough back through your ghosts and they fade away, 
 biggest gain at the final bell wins.
 
 Boltergeist is a trading game that runs on Strike's live markets, built around Strike's maker rebate. An
-line of graves is a maker order and a thundercloud is a maker exit, so a player who goes in at their graves and banks at a thundercloud is
+line of graves is a maker order and a thundercloud is a maker exit, so a player who goes in at their graves and cashes in at a thundercloud is
 paid by Strike both ways, where going in and out at the market pays the taker fee twice. Every price,
 candle and market comes from Strike, and every position is worked out the way Strike would: its fees, its
 smallest order, each market's leverage limits and margin tiers, and where it would be liquidated. Every
@@ -82,7 +82,7 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
   thundercloud gathers over that line, keeping pace a little ahead of them and striking the line again and
   again, each strike leaving a spidery scorch on the ground, so the price you want out at is marked out for
   you. Each strike lights the field: the sun's soft shadows give way to long ones thrown away from it. When
-  the kids walk into it, lightning comes down on them and you bank, as a maker again. Graves in and
+  the kids walk into it, lightning comes down on them and you cash in, as a maker again. Graves in and
   thundercloud out and Strike pays you both ways, so even the smallest move your way is a win.
 - **Give up the ghost** to close a call at the price now (a taker exit). Close near the best price a call saw, for a
   good profit, and it's a **critical hit**.
@@ -99,11 +99,11 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
   champion; then those who went out, the last to go first. Badges for a win, for surviving, and for
   critical hits. The debrief shows what you added to Strike's book and earned in maker rebates.
 
-Keys: `escape` fills in your graves, `space` banks, `left` `right` power (with `shift`, by 5).
+Keys: `escape` fills in your graves, `space` gives up the ghost, `left` `right` power (with `shift`, by 5).
 
 **Everyone in one game.** Every haunt has ten seats, and everyone who joins it is in the same one, on
 the same board: players on paper, players live on Strike (tagged live), and, in the seats nobody takes,
-players the game runs (tagged bot). The bots dig graves and summon thunderclouds, now and then charge in, bank and
+players the game runs (tagged bot). The bots dig graves and summon thunderclouds, now and then swoop in, give up and
 get knocked out like everyone else, and they're seeded by the haunt, so every player sees the same bots make
 the same calls. The board beside the field moves as it happens. Pick your name under the haunt button.
 
@@ -113,7 +113,7 @@ happened from Strike's candles and the game's record of everyone's moves.
 ### How the shared game works
 
 Each player's browser runs the whole haunt itself, from Strike's prices. What it can't know is what the
-other players do, so each call, bank and K.O. goes to a small record of moves for that haunt, kept in
+other players do, so each call, exit and K.O. goes to a small record of moves for that haunt, kept in
 DynamoDB by `app/api/arenas`, and every browser in the haunt reads it back every second and a half and
 plays the moves in at the times they were made. The server stamps each move with its own time and checks
 the price it was made at against Strike's mark price, so nobody can call at a price that wasn't there.
@@ -139,9 +139,9 @@ a call can only ever lose its stake.
   it, not when the chart says so, and a partial fill has the rest taken off and goes in with what filled.
   Moving your graves takes the order off Strike and places it again; filling them in cancels it.
 - **A thundercloud** is a reduce-only limit order for the whole position, placed the moment the graves
-  fills (or when you summon it on a call). It banks when Strike fills it. One the price has already passed fills at
+  fills (or when you summon it on a call). It cashes in when Strike fills it. One the price has already passed fills at
   once, at that price or better, and as a taker, so the game counts the fee Strike charged.
-- **Banking** closes reduce-only at the market, as a taker, and any thundercloud out comes off first.
+- **Giving up the ghost** closes reduce-only at the market, as a taker, and any thundercloud out comes off first.
 
 Where a call went in and where it's knocked out are Strike's. The final bell takes off anything still
 resting and closes what's open. A position Strike liquidates knocks you out of the game. The
@@ -161,7 +161,7 @@ between holding keys.
 | Candles for the chart and catching up a game | `GET /price/v2/klines?priceType=mark` |
 | Wallet sign-in | Builder Connect: `POST /auth/builder/request-signature`, `/auth/builder/verify-signature` |
 | Live graves and thunderclouds | `POST /v2/order` (limit, post-only for graves, reduce-only for thunderclouds), `DELETE /v2/order/cancel`, `GET /v2/order`, `/v2/history/fill` |
-| Live charges and banks | `POST /v2/marginMode`, `/v2/leverage`, `/v2/order` (market, reduce-only to close), `GET /v2/order`, `/v2/positions` |
+| Live entries and exits | `POST /v2/marginMode`, `/v2/leverage`, `/v2/order` (market, reduce-only to close), `GET /v2/order`, `/v2/positions` |
 | Balance | `GET /v2/account` |
 | Checking every move's price in the shared game | `GET /price/v2/markPrice` |
 | The order book, order by order: the hands and your place in line | L3: `GET /v2/l3/snapshot` (through `/api/l3`, as it has no CORS headers), then WebSocket `/ws/l3`, channel `{symbol}@l3`, each update in sequence |
@@ -184,18 +184,18 @@ Then open http://localhost:3000. It starts on paper with Strike's mainnet prices
 | --- | --- |
 | `NEXT_PUBLIC_STRIKE_NETWORK` | `mainnet` (the default) or `testnet` |
 | `NEXT_PUBLIC_BUILDER_CODE` | Your Strike builder code, for wallet sign-in |
-| `NEXT_PUBLIC_BUILDER_FEE_BPS` | An optional builder fee on live charges and banks, 0 to 100 basis points. Unset, there is none |
+| `NEXT_PUBLIC_BUILDER_FEE_BPS` | An optional builder fee on live entries and exits, 0 to 100 basis points. Unset, there is none |
 | `NEXT_PUBLIC_STRIKE_APP_URL` | Where players go to deposit |
-| `ARENAS_TABLE` | The arena's DynamoDB table. `boltergeist-arenas-dev` for local dev and previews, `boltergeist-arenas` in production |
+| `ARENAS_TABLE` | The game's DynamoDB table. `boltergeist-arenas-dev` for local dev and previews, `boltergeist-arenas` in production |
 | `AWS_ROLE_ARN` | On Vercel: the role for the deployment's environment (the stack's outputs). Locally, leave it unset and use `AWS_PROFILE` |
 | `DYNAMODB_ENDPOINT` | DynamoDB Local instead of AWS |
 
 `npm test` runs the game engine's tests and the live desk against a stand-in for Strike, `npm run test:db` runs the
-arena against DynamoDB Local in Docker, `npm run check` typechecks, `npm run lint` lints.
+game server against DynamoDB Local in Docker, `npm run check` typechecks, `npm run lint` lints.
 
 ## Hosting
 
-The app runs on Vercel. The arena's tables are in AWS, in one CDK stack, `BoltergeistStack` (`infra/`):
+The app runs on Vercel. The game's tables are in AWS, in one CDK stack, `BoltergeistStack` (`infra/`):
 
 | Resource | Name | Notes |
 | --- | --- | --- |
@@ -217,7 +217,7 @@ Then on the Vercel project set `ARENAS_TABLE` and `AWS_ROLE_ARN` for production 
 Each alert address gets a "Confirm subscription" email from AWS on the first deploy. The budget's filter only works
 once `project` is an active cost allocation tag (Billing, Cost allocation tags).
 
-The firewall rate limits the arena's routes and the order book route per address. Its rules are in `deploy/vercel-firewall.json`;
+The firewall rate limits the game's routes and the order book route per address. Its rules are in `deploy/vercel-firewall.json`;
 `node deploy/firewall.mjs` compares them with the live firewall and `node deploy/firewall.mjs apply` publishes them.
 
 `deploy/ship.sh` checks what's committed (types, lint, tests) and deploys a clean copy of it to production.
@@ -226,7 +226,7 @@ The firewall rate limits the arena's routes and the order book route per address
 
 | Path | What |
 | --- | --- |
-| `lib/game/war.ts` | The game: the haunt clock and each haunt's market, the lobby, rounds, floors, calls with Strike's fees and liquidation, banking, K.O.s, seeded bots, the final bell, standings |
+| `lib/game/war.ts` | The game: the haunt clock and each haunt's market, the lobby, rounds, floors, calls with Strike's fees and liquidation, giving up, K.O.s, seeded bots, the final bell, standings |
 | `lib/game/useWar.ts` | Your games in the browser, moved on by each price, the clock and the other players' moves, caught up on opening |
 | `lib/online.ts`, `lib/server/arenas.ts`, `app/api/arenas/` | The shared game: who's in each haunt and the record of their moves |
 | `infra/` | The AWS stack: the game's tables, the Vercel roles, the budget and alarm |

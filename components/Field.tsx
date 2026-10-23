@@ -10,7 +10,7 @@ import { ANGLES, KIDS_LEAD, kidsLantern, kidsTorch, paintCloud, paintKids, paint
 import { GHOST_KIND } from "./Spirit";
 import { paintTree } from "./trees";
 
-// What of yours is on the field: ghosts lying in wait, ghosts on the kids, your thundercloud, where banking starts to pay.
+// What of yours is on the field: ghosts lying in wait, ghosts on the kids, your thundercloud, where giving up starts to pay.
 export type Yours = {
   trap?: { side: Side; price: number; at: number; power: number; count: number; ahead?: number };
   call?: { side: Side; entry: number; at: number; power: number; count: number; maker: boolean; koAt: number; move: number };
@@ -605,7 +605,7 @@ function scorchSprite(A: number, variant: number) {
   });
 }
 
-// A gravestone for your ambush: rounded grey clay, its face lit and its edge in shade, moss at the foot, cracked, and its side's arrow
+// A gravestone in your line of graves: rounded grey clay, its face lit and its edge in shade, moss at the foot, cracked, and its side's arrow
 // cut into it. Drawn from the middle of its foot.
 function graveSprite(A: number, side: Side, variant: number, size: number) {
   const q = Math.round(A * size * 4) / 4;
@@ -1310,13 +1310,13 @@ export function Field(props: Props) {
     }
     stamp();
 
-    // The day's lines on the ground: the fight's start, each new round, the final bell.
+    // The day's lines on the ground: the haunt's start, each new round, the final bell.
     for (const [t, color] of [[span.from, COLORS.volt], ...rounds.map((r) => [r.at, "#f8a23a"] as const), [span.to, COLORS.volt]] as const) {
       const x = X(t);
       if (x >= ext.x0 && x <= ext.x1) line(ctx, S(x, ext.y0), S(x, ext.y1), color, 2, [8, 6]);
     }
 
-    // Lines across the ground: chalk where banking at the market breaks even, wire where you'd be knocked out.
+    // Lines across the ground: chalk where giving up at the market breaks even, wire where you'd be knocked out.
     if (yours.call && yours.even !== undefined && onMap(yOf(yours.even))) {
       line(ctx, S(Math.max(X(yours.call.at), ext.x0), yOf(yours.even)), S(ext.x1, yOf(yours.even)), css(CLAY.offWhite, 0.8), 1.6, [2, 6]);
     }
@@ -1609,7 +1609,7 @@ export function Field(props: Props) {
       return Array.from({ length: count }, (_, j) => ({ x: 0.75 + across * 0.5 + j * gap, dy: tight ? (j % 2 ? 0.32 : -0.32) : 0 }));
     };
 
-    // Your ambush: a line of graves on your line just ahead of the kids, set in the ground itself, so as the field moves on the one at
+    // Your graves: a line of them on your line just ahead of the kids, set in the ground itself, so as the field moves on the one at
     // the back sinks into the earth and a new one rises at the front. They sink away as your ghosts swirl up out of them.
     const graveRow = (ya: number, count: number, side: Side, sink: number) => {
       const xs = row(count);
@@ -1739,7 +1739,7 @@ export function Field(props: Props) {
       if (onMap(yk)) labels.push(() => marking(`K.O. ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), 0.28, COLORS.down));
       if (yours.even !== undefined && onMap(yOf(yours.even))) {
         const ye = yOf(yours.even);
-        labels.push(() => marking("BANK PAYS PAST HERE", 4.2, ye - 0.12, 0.24, "#e8edf2"));
+        labels.push(() => marking("GIVING UP PAYS PAST HERE", 4.2, ye - 0.12, 0.24, "#e8edf2"));
       }
     }
     if (yours.flag && yf !== null) {
@@ -1999,7 +1999,7 @@ export function Field(props: Props) {
       ctx.restore();
     }
 
-    // The day's markers, laid along their lines of time: the fight's start, each new round and its floor, the final bell.
+    // The day's markers, laid along their lines of time: the haunt's start, each new round and its floor, the final bell.
     for (const [t, label, color] of [
       [span.from, "HAUNTING BEGINS", COLORS.volt],
       ...rounds.map((r) => [r.at, `ROUND ${r.round}  ${r.floor}X FLOOR`, "#f8a23a"] as const),
@@ -2018,7 +2018,7 @@ export function Field(props: Props) {
       marking(mk.glyph, x, y + 0.2, 0.3, mk.color, { align: "center" });
     }
 
-    // Others' ambushes, along the edge of the fog where they wait.
+    // Others' graves, along the edge of the fog where they wait.
     const stacked = new Map<number, number>();
     for (const pin of pins) {
       const y = yOf(pin.p);

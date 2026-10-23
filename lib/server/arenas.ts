@@ -27,7 +27,7 @@ function db(): DynamoDBDocumentClient {
 }
 const table = () => process.env.ARENAS_TABLE!;
 
-// A fight's seat count, players, names and moves share its partition, and go a day after it ends. Moves sort first,
+// A game's seat count, players, names and moves share its partition, and go a day after it ends. Moves sort first,
 // then names (n#), players (p#), the seat count and the bell (x#), so a look from a move on picks up everything else too.
 const pk = (a: Arena) => `${NETWORK}#${a.id}`;
 const until = (a: Arena) => Math.ceil(a.endsAt / 1000) + 86_400;

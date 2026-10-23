@@ -58,7 +58,7 @@ function save(games: Game[]) {
 
 const yours = (g: Game | undefined) => g?.fighters.find((f) => f.id === YOU);
 const FEE_RATE = STRIKE.taker + BUILDER.feeBps / 10_000;
-// How long a game played online waits past the bell for the arena's price to end on, before ending on its own.
+// How long a game played online waits past the bell for the game's price to end on, before ending on its own.
 const BELL_WAIT = 8000;
 // Saving the games is put off to now and then, but never past a change in what's on Strike.
 const SAVE_MS = 5000;
@@ -78,6 +78,8 @@ export type War = {
   pull: (id: string) => void;
   flag: (id: string, price: number | undefined) => void;
   bank: (id: string) => void;
+  // Clears the last error, for a fresh screen.
+  dismiss: () => void;
   // What's on its way to Strike, while it is.
   busy: string | null;
   joining: boolean;
@@ -123,12 +125,12 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
   // Live calls known to be on Strike, by the game they're in, and those on their way out.
   const known = useRef(new Map<string, string>());
   const closing = useRef(new Set<string>());
-  // Live traps resting on Strike, by game; the flag order on each live call; and the games with an order on its way.
+  // Live traps resting on Strike, by game; the thundercloud order on each live call; and the games with an order on its way.
   const traps = useRef(new Map<string, string>());
   const flags = useRef(new Map<string, string>());
   const acting = useRef(new Set<string>());
 
-  // What each game played online has heard from the arena so far, in the order it came in.
+  // What each game played online has heard from the game server so far, in the order it came in.
   const logs = useRef(new Map<string, Log>());
 
   // A game that's been away from the price, closed or walked into late, is caught up from Strike's candles.
@@ -162,7 +164,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
 
   // Games move on by Strike's marks, at the time Strike gives each one, so every browser sees the bots act at the same
   // prices. The clock alone only walks a game up to its start, and over the bell. A game played online waits a moment
-  // at the bell for the arena's price, so everyone in it ends on the same one.
+  // at the bell for the game's price, so everyone in it ends on the same one.
   const moveOn = useCallback(
     (all: Record<string, Mark>, ticking: boolean) =>
       setGames((gs) =>
@@ -188,7 +190,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
 
   const marketOf = (symbol: string) => latest.current.markets.find((m) => m.symbol === symbol);
 
-  // The other players in each arena you're in: who's come in, and what they've done.
+  // The other players in each game you're in: who's come in, and what they've done.
   const looking = useRef(new Set<string>());
   useEffect(() => {
     const timer = setInterval(() => {
@@ -212,7 +214,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     if (g.me) tell(g.id, g.me, m).catch((err: Error) => setError(`The game missed that: ${err.message}`));
   }, []);
 
-  // Your traps springing and flags banking happen here by the price: the arena hears of them too.
+  // Your graves springing and thunderclouds striking happen here by the price: the game server hears of them too.
   const told = useRef(new Map<string, number>());
   useEffect(() => {
     for (const g of games) {
@@ -224,7 +226,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     }
   }, [games, announce]);
 
-  // A live call that's left its game here (zapped, or the final bell) comes off Strike too.
+  // A live call that's left its game here (banished, or the final bell) comes off Strike too.
   useEffect(() => {
     if (!ex) return;
     for (const [liveId, gameId] of known.current) {
@@ -250,7 +252,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     }
   }, [games, ex, update]);
 
-  // A live trap that's left its game (zapped, or the final bell) comes off Strike too. One that filled on its way out
+  // A live trap that's left its game (banished, or the final bell) comes off Strike too. One that filled on its way out
   // comes straight back off, and what that made or lost is kept.
   const lifting = useRef(new Set<string>());
   useEffect(() => {
@@ -275,13 +277,13 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     }
   }, [games, ex, update]);
 
-  // Plants a live call's flag on Strike, moving the one it has, or takes it off with no price. Where it went, if anywhere.
+  // Summons a live call's thundercloud on Strike, moving the one it has, or takes it off with no price. Where it went, if anywhere.
   const replant = useCallback(
     async (g: Game, c: { live: string; flagOrder?: string }, price: number | undefined): Promise<number | undefined> => {
       const market = marketOf(g.symbol);
       if (!ex || !market) return;
       if (c.flagOrder) {
-        // One that banked first is left for the watch to take in.
+        // One that struck first is left for the watch to take in.
         if ((await lift(ex, g.symbol, c.flagOrder))?.Status === "filled") return;
         flags.current.delete(c.live);
       }
@@ -299,7 +301,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     [ex, update],
   );
 
-  // Strike's word on live traps and flags: whether they've filled yet.
+  // Strike's word on live graves and thunderclouds: whether they've filled yet.
   useEffect(() => {
     if (!ex) return;
     const timer = setInterval(async () => {
@@ -356,7 +358,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
           const held = await ex.position(g.symbol);
           if (closing.current.has(c.live) || acting.current.has(g.id)) continue;
           if (!held && c.flagOrder) {
-            // Gone at the flag, or knocked out with the flag left over.
+            // Gone at the thundercloud, or knocked out with the thundercloud left over.
             const banked = await hit(ex, g.symbol, c.flagOrder);
             if (banked && banked !== "gone") {
               known.current.delete(c.live);
@@ -378,8 +380,8 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     return () => clearInterval(timer);
   }, [ex, update, announce]);
 
-  // Joining takes a seat in the arena of that kind that's open. Everyone in it has the same most power: the most the top stake can carry.
-  // With the arena out of reach, the fight goes on with bots in every other seat.
+  // Joining takes a seat in the game of that kind that's open. Everyone in it has the same most power: the most the top stake can carry.
+  // With the game server out of reach, the haunt goes on with bots in every other seat.
   const enter = useCallback(
     async (kind: Kind, role: Role, live = false) => {
       const symbols = latest.current.markets.map((m) => m.symbol);
@@ -449,7 +451,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
       const market = marketOf(g.symbol);
       if (!ex) return setError("Connect to Strike to make live calls");
       if (!market || !canCall(g, p, Date.now())) return;
-      act(id, "charging in on Strike...", async () => {
+      act(id, "swooping in on Strike...", async () => {
         if (!(await unset(g))) return;
         const mark = latest.current.marks[g.symbol]?.p ?? g.price;
         const fill = await open(ex, { market, mark, side, stake: yours(g)!.cash, power: p, clientId: `tw-${g.id}-${Date.now().toString(36)}`, feeRate: FEE_RATE });
@@ -543,10 +545,10 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
         return announce(g, { what: "bank", price: g.price });
       }
       const market = marketOf(g.symbol);
-      if (!ex || !market) return setError("Connect to Strike to bank a live call");
+      if (!ex || !market) return setError("Connect to Strike to give up a live call");
       const liveId = c.live;
-      act(id, "banking on Strike...", async () => {
-        // A flag out comes off first; if it banked on the way, the watch takes that in.
+      act(id, "giving up the ghost on Strike...", async () => {
+        // A thundercloud out comes off first; if it struck on the way, the watch takes that in.
         if (c.flagOrder && (await lift(ex, g.symbol, c.flagOrder))?.Status === "filled") return;
         flags.current.delete(liveId);
         closing.current.add(liveId);
@@ -567,5 +569,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     [ex, update, announce, act],
   );
 
-  return { games, enter, call, trap, pull, flag, bank, busy, joining, error };
+  const dismiss = useCallback(() => setError(null), []);
+
+  return { games, enter, call, trap, pull, flag, bank, dismiss, busy, joining, error };
 }

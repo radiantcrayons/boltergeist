@@ -95,7 +95,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
             ghosts rise, you&apos;re in, and Strike pays you to be.
           </li>
           <li>
-            <b>Summon a thundercloud.</b> Click past the kids to set where you get out. When they walk into it, lightning strikes and you bank. The biggest gain at the final bell wins.
+            <b>Summon a thundercloud.</b> Click past the kids to set where you get out. When they walk into it, lightning strikes and you cash in. The biggest gain at the final bell wins.
           </li>
         </ol>
       </section>
@@ -239,7 +239,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
                   {KINDS[g.kind].name} <span className="dim">{g.symbol.replace(/-USD$/, "")}</span> {ROLES[me.role].hero}
                 </span>
                 <span className="dim">{waiting ? `starts in ${fmt.clock(g.startsAt - now)}` : `${fmt.clock(g.endsAt - now)} left`}</span>
-                <span>{me.out ? (me.out.by === "ko" ? "K.O." : "zapped") : fmt.money(worth(me, g.price))}</span>
+                <span>{me.out ? (me.out.by === "ko" ? "K.O." : "banished") : fmt.money(worth(me, g.price))}</span>
                 <span className="dim">{waiting ? `${g.fighters.length}/${SEATS} in` : `${fmt.ordinal(placeOf(g, YOU))} of ${g.fighters.length}`}</span>
                 <span className="go-to">return &rarr;</span>
               </button>
@@ -272,7 +272,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
                     <span>
                       {KINDS[g.kind].name} <span className="dim">{g.symbol.replace(/-USD$/, "")}</span> {ROLES[me.role].hero}
                     </span>
-                    <span className="dim">{me.out ? `${me.out.by === "ko" ? "K.O." : "zapped"}, ${fmt.ordinal(placeOf(g, YOU))}` : `${fmt.ordinal(placeOf(g, YOU))} of ${g.fighters.length}`}</span>
+                    <span className="dim">{me.out ? `${me.out.by === "ko" ? "K.O." : "banished"}, ${fmt.ordinal(placeOf(g, YOU))}` : `${fmt.ordinal(placeOf(g, YOU))} of ${g.fighters.length}`}</span>
                     <span className={made > 0 ? "good" : made < 0 ? "bad" : "dim"}>
                       {fmt.money(worth(me, g.price) - me.stake, true)} <span className="dim">{fmt.gain(made)}</span>
                     </span>

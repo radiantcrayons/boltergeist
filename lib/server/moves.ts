@@ -8,11 +8,11 @@ export class Refused extends Error {
   }
 }
 
-// What the arena knows a player has on: their call or trap, each with its flag, as the arena took them.
+// What the game knows a player has on: their call or graves, each with its thundercloud, as the game took them.
 export type Held = { side: Side; power: number; price: number; at: number; flag?: number; flagAt?: number };
 export type State = { n: number; lastAt: number; call?: Held; trap?: Held; out?: boolean };
 
-// How far a trap or flag can sit from the price, and how close the price has to come for one to count as reached:
+// How far graves or a thundercloud can sit from the price, and how close the price has to come for one to count as reached:
 // a few seconds of the mark, and less than the taker fee a quick way out would cost.
 export const REACH = 0.2;
 export const TOL = 0.0005;
@@ -28,7 +28,7 @@ export type Prices = {
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
 const down = (side: Side) => (side === "long" ? "down" : "up");
 const up = (side: Side) => (side === "long" ? "up" : "down");
-// Past a price on a side's way: below it for a long trap, above it for a long flag.
+// Past a price on a side's way: below it for long graves, above it for a long thundercloud.
 const below = (side: Side, a: number, b: number) => (side === "long" ? a < b * (1 + TOL) : a > b * (1 - TOL));
 
 const sided = (body: Record<string, unknown>) => {
@@ -53,7 +53,7 @@ const without = <T extends { flag?: number; flagAt?: number }>(x: T): T => {
 };
 
 // A move as a player asks for it, checked against what they have on and Strike's price, and what it leaves them with.
-// Calls and banks go in at Strike's price, fills at the trap's own price, and nothing a player says about Strike is taken.
+// Calls and give-ups go at Strike's price, fills at the trap's own price, and nothing a player says about Strike is taken.
 export async function rule(kind: Kind, was: State, body: Record<string, unknown>, now: number, prices: Prices): Promise<{ move: Omit<Move, "at" | "who">; state: State }> {
   if (was.n >= CAP[kind]) throw new Refused("That's all the moves one game takes", 429);
   if (was.out) throw new Refused("You're out of this game", 409);
@@ -106,7 +106,7 @@ export async function rule(kind: Kind, was: State, body: Record<string, unknown>
     }
     case "bank": {
       const c = was.call;
-      if (!c) throw new Refused("Nothing to bank", 409);
+      if (!c) throw new Refused("Nothing to give up", 409);
       const said = num(body.flag);
       const atFlag = !!c.flag && said === c.flag && (await prices.reached(up(c.side), c.flag, c.flagAt ?? c.at));
       const price = atFlag ? c.flag! : await prices.mark();
@@ -119,6 +119,6 @@ export async function rule(kind: Kind, was: State, body: Record<string, unknown>
       return { move: { what: "ko", price: num(body.price) }, state: { ...state, out: true } };
     }
     default:
-      throw new Refused("Call, trap, flag, bank or K.O.?");
+      throw new Refused("Call, graves, thundercloud, give up or K.O.?");
   }
 }

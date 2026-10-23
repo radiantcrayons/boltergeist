@@ -13,7 +13,7 @@ interface AlarmsProps {
 
 /**
  * Emails when the arenas table turns requests away at its ceiling (lib/tables.ts), and again when it
- * stops. Players then fight on, but stop seeing each other's moves. Each address gets a one-time
+ * stops. Players then play on, but stop seeing each other's moves. Each address gets a one-time
  * "Confirm subscription" email from AWS on the first deploy.
  */
 export class Alarms extends Construct {

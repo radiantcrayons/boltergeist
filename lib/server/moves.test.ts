@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { CAP, rule, type Prices, type State } from "./moves.ts";
 
 const MARK = 100;
-// Strike's price, and the lows and highs it's seen, as the arena would ask for them.
+// Strike's price, and the lows and highs it's seen, as the game would ask for them.
 const prices = (mark = MARK, seen: { low?: number; high?: number } = {}): Prices => ({
   mark: async () => mark,
   reached: async (way, price) => (way === "down" ? Math.min(mark, seen.low ?? mark) <= price * 1.0005 : Math.max(mark, seen.high ?? mark) >= price * 0.9995),
@@ -22,7 +22,7 @@ test("a call goes in at Strike's price, whatever the player says it was, and not
 });
 
 test("a bank needs a call, goes out at Strike's price, and takes no value from the player", async () => {
-  await assert.rejects(go(fresh, { what: "bank", price: 150 }), /Nothing to bank/);
+  await assert.rejects(go(fresh, { what: "bank", price: 150 }), /Nothing to give up/);
   const { state } = await go(fresh, { what: "call", side: "long", power: 10 });
   const { move, state: after } = await go(state, { what: "bank", price: 150, value: 1e6, live: true }, prices(101));
   assert.deepEqual(move, { what: "bank", price: 101 });
@@ -76,5 +76,5 @@ test("pulls need graves, a K.O. puts a player out for good, and every move count
   assert.ok(out.out);
   await assert.rejects(go(out, { what: "call", side: "long", power: 10 }), /out of this game/);
   await assert.rejects(go({ n: CAP.battle, lastAt: 0 }, { what: "call", side: "long", power: 10 }), /all the moves/);
-  await assert.rejects(go(fresh, { what: "dance" }), /Call, trap/);
+  await assert.rejects(go(fresh, { what: "dance" }), /Call, graves/);
 });

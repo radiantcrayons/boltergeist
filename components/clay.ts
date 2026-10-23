@@ -333,7 +333,7 @@ const SPOOKS: Record<GhostKind, [(body: RGB, phase: number, boo: boolean) => Par
 // How many ways round a ghost can be turned: enough for it to spin smoothly.
 export const ANGLES = 32;
 
-// A ghost of a kind at px pixels to a unit: frame sets its sway, boo is the attack, and turn is how far round it has spun, in sixteenths.
+// A ghost of a kind at px pixels to a unit: frame sets its sway, boo is it jumping out, and turn is how far round it has spun, in sixteenths.
 // Turned at all, it needs as much room on one side as the other.
 export function paintSpook(kind: GhostKind, body: RGB, px: number, frame: number, frames: number, boo = false, turn = 0): Figure {
   const [make, left, wide] = SPOOKS[kind];

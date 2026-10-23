@@ -77,7 +77,7 @@ after(() => {
 });
 
 let next = Math.ceil(realNow() / KINDS.battle.every) * KINDS.battle.every;
-// A battle of its own for each test, its doors open a minute in.
+// A Haunting of its own for each test, its doors open a minute in.
 async function battle(): Promise<Arena> {
   const a = await store.arena(`battle-${(next / 60_000).toString(36)}`);
   next += KINDS.battle.every;
@@ -86,7 +86,7 @@ async function battle(): Promise<Arena> {
 }
 
 const proof = (key: string) => ({ key, signature: "ab".repeat(64), timestamp: String(Math.floor(clock / 1000)), nonce: "123e4567-e89b-12d3-a456-426614174000" });
-// Strike's price moves on, and the arena's last look at it runs out.
+// Strike's price moves on, and the game's last look at it runs out.
 const markTo = (p: number) => {
   MARK = p;
   clock += 2000;
@@ -138,7 +138,7 @@ test("shut doors, bad names, made up ghosts and strangers are turned away", asyn
   await assert.rejects(store.join(a, { secret: secret(), name: "Late Otter", role: "warlord" }), /started without you/);
 });
 
-test("moves are stamped with the arena's time and Strike's price, checked against what the player has on, and read back in order", async () => {
+test("moves are stamped with the game's time and Strike's price, checked against what the player has on, and read back in order", async () => {
   const a = await battle();
   const me = secret();
   const { player } = await store.join(a, { secret: me, name: "Iron Lynx 40", role: "warlord" });
@@ -152,7 +152,7 @@ test("moves are stamped with the arena's time and Strike's price, checked agains
   const bank = await store.act(a, { secret: me, what: "bank", price: 1, value: 1e9, live: true });
   assert.equal(bank.price, MARK);
   assert.equal(bank.value, undefined);
-  await assert.rejects(store.act(a, { secret: me, what: "bank", price: MARK }), /Nothing to bank/);
+  await assert.rejects(store.act(a, { secret: me, what: "bank", price: MARK }), /Nothing to give up/);
   assert.equal(call.at, a.startsAt + 61_000);
   assert.equal(call.who, player.id);
   const log = await store.log(a, { fresh: true });

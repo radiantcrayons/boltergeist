@@ -68,7 +68,7 @@ test("a call pays the taker fee each way and is knocked out where its margin run
   near(s.koAt, (100 + 49.9 / 2) / 1.005);
 });
 
-test("a call goes all in at no less than the round's floor, and banking takes what it made", () => {
+test("a call goes all in at no less than the round's floor, and giving up takes what it made", () => {
   let g = quiet();
   assert.equal(leastPower(g, me(g), now), 2);
   assert.equal(canCall(g, 1, now + 1000), false);
@@ -85,7 +85,7 @@ test("a call goes all in at no less than the round's floor, and banking takes wh
   assert.equal(g.feed[0].what, "bank");
 });
 
-test("banking near the best price a call saw, for a good profit, is a critical hit", () => {
+test("giving up near the best price a call saw, for a good profit, is a critical hit", () => {
   let g = call(quiet(), "long", 20, now + 1000);
   g = advance(g, { h: 101.5, l: 100.5, c: 101 }, now + 2000);
   g = advance(g, at(101.4), now + 3000);
@@ -126,7 +126,7 @@ test("at the end what's in a call comes out at the price, and nothing more can b
   assert.equal(call(g, "long", 5, g.endsAt + 1000), g);
 });
 
-test("rivals play a whole battle caught up over candles, and nobody ends below zero", () => {
+test("rivals play a whole Haunting caught up over candles, and nobody ends below zero", () => {
   const g = enter(arena(), "soldier", 100, now);
   const candles = Array.from({ length: 61 }, (_, i) => {
     const p = 100 * (1 + 0.03 * Math.sin(i / 5));
@@ -213,7 +213,7 @@ test("a live call goes by Strike: its entry and K.O. level, no K.O. until Strike
   assert.equal(me(settle(ko, 12)).cash, 12);
 });
 
-test("one arena per kind to join: the running one while its doors are open, then the next, each on the market whose turn it is", () => {
+test("one game per kind to join: the running one while its doors are open, then the next, each on the market whose turn it is", () => {
   const symbols = ["BTC-USD", "ETH-USD", "SOL-USD", "ADA-USD"];
   const { every, doors, ms } = KINDS.war;
   const s = Math.ceil(now / every) * every;
@@ -247,7 +247,7 @@ test("walking in while the doors are open: every seat's taken, the rivals are ca
   assert.equal(canCall(caught, 2, late + 1000), true);
 });
 
-test("an arena's rivals are the same for everyone: names, heroes, and when they walk in", () => {
+test("a game's rivals are the same for everyone: names, ghosts, and when they walk in", () => {
   const a = arena("skirmish");
   const one = lineup(a);
   assert.deepEqual(lineup({ ...a }), one);
@@ -262,7 +262,7 @@ test("an arena's rivals are the same for everyone: names, heroes, and when they 
   assert.equal(heroes.size, 3);
 });
 
-test("before the start: rivals walk in, nobody can call, then the fight starts with every seat full", () => {
+test("before the start: rivals walk in, nobody can call, then the haunt starts with every seat full", () => {
   const a = arena("skirmish");
   const early = a.opensAt + 1000;
   let g = enter(a, "soldier", 100, early);
@@ -322,7 +322,7 @@ test("a player with a ghost nobody knows is left out rather than breaking the ga
   assert.equal(heed(g, { players: [odd], moves: [] }, now + 1000).fighters.length, g.fighters.length);
 });
 
-test("other players' live calls and banks land at the arena's prices, not at what they say Strike gave them", () => {
+test("other players' live calls and banks land at the game's prices, not at what they say Strike gave them", () => {
   const a = arena("battle");
   const log: Log = {
     players: [p("ann", now - 5000)],
@@ -340,7 +340,7 @@ test("other players' live calls and banks land at the arena's prices, not at wha
   near(ann().cash, valueOf(opening("long", 10, 100, 10, now + 1000), 101));
 });
 
-test("at the bell everyone settles on the arena's price when it has one", () => {
+test("at the bell everyone settles on the game's price when it has one", () => {
   const a = arena("skirmish");
   let g = advance(enter(a, "commando", 100, a.startsAt - 1000), at(100), a.startsAt + 1000);
   g = call(g, "long", 5, a.startsAt + 1000);
@@ -417,7 +417,7 @@ test("a call that comes in before a round ends counts for that round, one made a
   assert.ok(foughtIn(g, fighter("bo"), 1));
 });
 
-test("an arena's id says when it starts, and its doors are only open until the first round is well under way", () => {
+test("a game's id says when it starts, and its doors are only open until the first round is well under way", () => {
   const symbols = ["BTC-USD", "ETH-USD"];
   const a = arenaAt("battle", now, symbols);
   assert.deepEqual(arenaOf(a.id, symbols), a);
@@ -449,7 +449,7 @@ test("a trap springs when the price trades through it, in at exactly its price w
   assert.equal(g.feed[0].maker, true);
   assert.equal(me(g).fought & 1, 1);
   near(worth(me(g), 99), 50 + 50 * 10 * -STRIKE.maker);
-  assert.ok(valueOf(c, 99) < 50, "banking at the market there pays the taker fee");
+  assert.ok(valueOf(c, 99) < 50, "giving up at the market there pays the taker fee");
 });
 
 test("a long trap goes below the price and a short one above, and setting another moves it", () => {
@@ -464,7 +464,7 @@ test("a long trap goes below the price and a short one above, and setting anothe
   assert.equal(me(pullTrap(moved)).trap, null);
 });
 
-test("a flag banks at its price as a maker, so trap and flag make money on the smallest move", () => {
+test("a thundercloud cashes in at its price as a maker, so graves and thundercloud make money on the smallest move", () => {
   assert.ok(hurdle(STRIKE.maker, STRIKE.maker) < 0);
   near(hurdle(STRIKE.taker, STRIKE.taker), 0.001 / 0.9995);
   let g = setTrap(started(), "long", 20, 99, now + 2000);
@@ -478,10 +478,10 @@ test("a flag banks at its price as a maker, so trap and flag make money on the s
   assert.equal(g.feed[0].what, "bank");
   assert.equal(g.feed[0].maker, true);
   const charged = advance(bank(advance(call(started(), "long", 20, now + 2000), at(100.02), now + 3000), now + 3000), at(100.02), now + 4000);
-  assert.ok(me(charged).cash < 50, "charging in and banking out on the same move loses the fees");
+  assert.ok(me(charged).cash < 50, "swooping in and giving up on the same move loses the fees");
 });
 
-test("banking at the break-even price comes out at the stake, for charges and ambushes either way", () => {
+test("giving up at the break-even price comes out at the stake, in by swooping or by graves, either way", () => {
   for (const side of ["long", "short"] as const) {
     const charged = me(call(started(), side, 20, now + 2000)).call!;
     near(valueOf(charged, breakEven(charged)), charged.stake);
@@ -489,21 +489,21 @@ test("banking at the break-even price comes out at the stake, for charges and am
     const ambushed = me(advance(setTrap(started(), side, 20, side === "long" ? 99.9 : 100.1, now + 2000), side === "long" ? bar(100, 99.8) : bar(100.2, 100), now + 3000)).call!;
     assert.ok(ambushed.maker);
     near(valueOf(ambushed, breakEven(ambushed)), ambushed.stake);
-    assert.ok(Math.abs(breakEven(ambushed) - ambushed.entry) < Math.abs(breakEven(charged) - charged.entry), "an ambush has less to cover");
+    assert.ok(Math.abs(breakEven(ambushed) - ambushed.entry) < Math.abs(breakEven(charged) - charged.entry), "graves have less to cover");
   }
 });
 
-test("the bank button shows a call's move before fees, and the bank says what the fees took", () => {
+test("a call's move is before fees, and giving up says what the fees took", () => {
   let g = advance(call(started(), "long", 20, now + 2000), at(100.02), now + 3000);
   const c = me(g).call!;
   near(moveOf(c, 100.02), (50 * 20 * (100.02 - c.entry)) / c.entry);
   assert.ok(moveOf(c, 100.02) > 0);
   g = bank(g, now + 3000);
   near(g.feed[0].move!, moveOf(c, 100.02));
-  assert.ok(g.feed[0].made! < 0, "a charge banked on a small move loses the fees");
+  assert.ok(g.feed[0].made! < 0, "a swoop given up on a small move loses the fees");
 });
 
-test("an ambush can wait unsprung through a round's end and still be there", () => {
+test("graves can wait unsprung through a round's end and still be there", () => {
   const g = advance(setTrap(started(), "long", 10, 90, now + 2000), at(100), roundEnds(quiet(), 0) + 5000);
   assert.equal(me(g).out, null);
   assert.equal(me(g).trap?.price, 90);
@@ -551,7 +551,7 @@ test("rivals set traps that spring, and none are left waiting at the final bell"
   assert.ok(done.fighters.every((f) => !f.trap));
 });
 
-test("a call held through a round counts for it, even banked at the bell", () => {
+test("a call held through a round counts for it, even closed at the bell", () => {
   let g = advance(call(started(), "long", 5, now + 2000), at(100), roundEnds(quiet(), 0) - 1000);
   g = advance(g, at(100), roundEnds(g, 1) - 1000);
   g = bank(g, roundEnds(g, 1) + 500);
@@ -560,7 +560,7 @@ test("a call held through a round counts for it, even banked at the bell", () =>
   assert.equal(me(g).fought & 0b11, 0b11);
 });
 
-test("a live trap and flag go by Strike: not sprung or banked by the price here, but when Strike fills them", () => {
+test("live graves and thundercloud go by Strike: not sprung or struck by the price here, but when Strike fills them", () => {
   let g = setTrap(started(), "long", 10, 99, now + 2000, { live: "tw-t", size: 5.05 });
   g = plantFlag(g, 99.5, now + 2000);
   g = advance(g, bar(99.2, 98), now + 3000);
@@ -571,11 +571,11 @@ test("a live trap and flag go by Strike: not sprung or banked by the price here,
   assert.deepEqual([c.entry, c.fee, c.koAt, c.live, c.size, c.maker, c.flag], [99, -0.02, 90.1, "tw-t", 5.05, true, 99.5]);
   assert.equal(me(g).fought & 1, 1);
   assert.equal(g.feed[0].maker, true);
-  assert.equal(flagHit(g, now + 4000, 99.5), g, "no flag on Strike yet");
+  assert.equal(flagHit(g, now + 4000, 99.5), g, "no thundercloud on Strike yet");
   g = plantFlag(g, 99.6, now + 4000, "tw-f");
   assert.equal(me(g).call?.flagOrder, "tw-f");
   g = advance(g, bar(100, 99.4), now + 5000);
-  assert.ok(me(g).call, "the price going through doesn't bank it");
+  assert.ok(me(g).call, "the price going through doesn't strike it");
   near(me(flagHit(g, now + 5500, 99.61, 0.25)).cash, valueOf(c, 99.61, 0) - 0.25);
   g = flagHit(g, now + 5500, 99.61);
   assert.equal(me(g).call, null);

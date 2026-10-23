@@ -37,7 +37,7 @@ export const why = (o: Order) => {
   return o.Status === "canceled" ? "Strike cancelled it" : `Strike ${o.Status} it`;
 };
 export const filledOf = (o: Order | null) => Number(o?.Filled) || 0;
-// On one of the market's ticks, rounded away from the price, so a trap or flag can't land on the wrong side of where it was set.
+// On one of the market's ticks, rounded away from the price, so graves or a thundercloud can't land on the wrong side of where it was set.
 const onTick = (price: number, tick: number, up: boolean) => {
   const n = price / tick;
   return Number(((up ? Math.ceil(n - 1e-9) : Math.floor(n + 1e-9)) * tick).toFixed(decimals(tick)));
@@ -120,7 +120,7 @@ export async function close(
   try {
     await filled(ex, market.symbol, clientId, waitMs);
   } catch (err) {
-    // Slow to show as filled: banked if Strike no longer holds the position.
+    // Slow to show as filled: closed if Strike no longer holds the position.
     if (err instanceof Refused) throw err;
     await lift(ex, market.symbol, clientId, waitMs).catch(() => null);
     if (await ex.position(market.symbol).catch(() => held)) throw err;
@@ -155,7 +155,7 @@ export async function lay(
   return { live: clientId, price, size };
 }
 
-// Taking a trap or a flag off Strike. What filled of it first stands, so it comes back as it ended.
+// Taking graves or a thundercloud off Strike. What filled of it first stands, so it comes back as it ended.
 export async function lift(ex: Exchange, symbol: string, clientId: string, waitMs = 400): Promise<Order | null> {
   let o = await ex.order(symbol, clientId);
   let asked = false;
@@ -190,11 +190,11 @@ export async function caught(ex: Exchange, market: Market, clientId: string, mak
   };
 }
 
-// Planting a flag: a reduce-only limit order to bank all of the position at that price, or better if it's already past it.
+// Summoning a thundercloud: a reduce-only limit order to close all of the position at that price, or better if it's already past it.
 export async function plant(ex: Exchange, flag: { market: Market; price: number; clientId: string }, waitMs = 400): Promise<{ live: string; price: number }> {
   const { market, clientId } = flag;
   const held = await ex.position(market.symbol);
-  if (!held) throw new Refused("There's no position on Strike to plant a flag on");
+  if (!held) throw new Refused("There's no position on Strike to summon a thundercloud over");
   const sell = held.side === "long";
   const price = onTick(flag.price, market.tickSize, sell);
   await ex.limit(market.symbol, sell ? "sell" : "buy", held.size.toFixed(decimals(market.stepSize)), price.toFixed(decimals(market.tickSize)), clientId, { reduceOnly: true });
@@ -203,7 +203,7 @@ export async function plant(ex: Exchange, flag: { market: Market; price: number;
   return { live: clientId, price };
 }
 
-// Whether a flag has banked on Strike: all of it filled, at what price on average, and for what fee.
+// Whether a thundercloud has struck on Strike: all of it filled, at what price on average, and for what fee.
 export async function hit(ex: Exchange, symbol: string, clientId: string): Promise<{ price: number; at: number; fee?: number } | "gone" | null> {
   const o = await ex.order(symbol, clientId);
   if (!o || o.Status !== "filled") return o && GONE.includes(o.Status) ? "gone" : null;

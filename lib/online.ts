@@ -37,7 +37,7 @@ export async function rename(name: string): Promise<Me | null> {
   return now;
 }
 
-// The arena's clock, less ours: its times come back onto this browser's clock with it. Only taken from answers made just
+// The game server's clock, less ours: its times come back onto this browser's clock with it. Only taken from answers made just
 // for us (never a cached one), and kept from the quickest round trip, where the guess of when it was made is closest.
 let skew = 0;
 let timed = false;
@@ -50,7 +50,7 @@ const local = (log: Log): Log => ({
 export class Full extends Error {}
 class Down extends Error {}
 
-// Once the arena says it's offline, this browser plays on with bots and stops asking.
+// Once the game server says it's offline, this browser plays on with bots and stops asking.
 let offline = false;
 
 async function send<T>(path: string, init?: RequestInit, fresh = init?.method === "POST"): Promise<T | null> {
@@ -73,15 +73,15 @@ async function send<T>(path: string, init?: RequestInit, fresh = init?.method ==
   return body;
 }
 
-// Proof of the Strike account a key belongs to, for the arena to check with Strike: so a seat taken signed in follows the account.
+// Proof of the Strike account a key belongs to, for the game server to check with Strike: so a seat taken signed in follows the account.
 async function proofOf(keys: Keys) {
   const h = await signedHeaders(keys, "GET", "/v2/account");
   return { key: h["X-API-Wallet-Public-Key"], signature: h["X-API-Wallet-Signature"], timestamp: h["X-API-Wallet-Timestamp"], nonce: h["X-API-Wallet-Nonce"] };
 }
 
 // Taking a seat: in that game, or a copy of it beside it when it's full (`arena` says which). Signed in to Strike, the seat is
-// the account's, and taken back from any device signed in to it. Null when the arena isn't reachable or is down, so the
-// fight goes on with bots alone.
+// the account's, and taken back from any device signed in to it. Null when the game server isn't reachable or is down, so the
+// haunt goes on with bots alone.
 export async function join(arena: string, role: Role, live: boolean, keys?: Keys): Promise<{ me: string; arena: string; joinedAt: number; log: Log } | null> {
   const { secret, name } = await me();
   const proof = keys ? await proofOf(keys).catch(() => undefined) : undefined;
