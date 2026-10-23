@@ -88,7 +88,7 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
         </h1>
         <ol className="rules">
           <li>
-            <b>Pick a fright and a ghost.</b> Everyone in a fright plays the same Strike market. Your ghost&apos;s stake is your stack.
+            <b>Pick a fright and a ghost.</b> Everyone in a fright plays the same Strike market. Your ghost&apos;s stake is your funds.
           </li>
           <li>
             <b>Dig your graves.</b> The kids with the lantern are the price. Click below them to go &#9650; long, above them to go &#9660; short. When the kids walk onto your graves your
