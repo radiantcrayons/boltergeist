@@ -389,7 +389,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
     return () => clearInterval(timer);
   }, [ex, update, replant]);
 
-  // Strike's word on live calls: still there (and where it's knocked out), or liquidated.
+  // Strike's word on live calls: still there (and where it's busted), or liquidated.
   useEffect(() => {
     if (!ex) return;
     const timer = setInterval(async () => {
@@ -400,7 +400,7 @@ export function useWar(marks: Record<string, Mark>, markets: Market[], session: 
           const held = await ex.position(g.symbol);
           if (closing.current.has(c.live) || acting.current.has(g.id)) continue;
           if (!held && c.flagOrder) {
-            // Gone at the thundercloud, or knocked out with the thundercloud left over.
+            // Gone at the thundercloud, or busted with the thundercloud left over.
             const banked = await hit(ex, g.symbol, c.flagOrder);
             if (banked && banked !== "gone") {
               known.current.delete(c.live);

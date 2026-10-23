@@ -72,7 +72,7 @@ test("a thundercloud goes past the price for a call and past the graves for a tr
   assert.equal((await go(trapped, { what: "flag", price: 101 })).state.trap!.flag, 101);
 });
 
-test("pulls need graves, a K.O. puts a player out for good, and every move counts to a cap", async () => {
+test("pulls need graves, a bust puts a player out for good, and every move counts to a cap", async () => {
   await assert.rejects(go(fresh, { what: "pull" }), /No graves/);
   const called = (await go(fresh, { what: "call", side: "long", power: 10 })).state;
   const out = (await go(called, { what: "ko", price: 90 })).state;

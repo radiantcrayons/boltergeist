@@ -118,7 +118,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         if (e.who === "you") play("earth");
       } else if (e.what === "end") {
         const p = placeOf(game, YOU);
-        if (me.out) say({ title: me.out.by === "ko" ? "knocked out" : "banished", detail: `${fmt.ordinal(p)} of ${game.fighters.length}`, tone: "bad" }, "out");
+        if (me.out) say({ title: me.out.by === "ko" ? "busted" : "banished", detail: `${fmt.ordinal(p)} of ${game.fighters.length}`, tone: "bad" }, "out");
         else if (p === 1) say({ title: "champion!", detail: fmt.money(made, true), tone: "good", scene: scene({ kind: "victory", you: [hpNow, hpNow], them: [10, 0], title: "champion!", detail: fmt.money(made, true) }) }, "win");
         else
           say(
@@ -128,7 +128,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
       } else if (e.who !== "you") {
         if (e.what === "ko" || e.what === "zap") play("out");
       } else if (e.what === "ko") {
-        say({ title: "K.O.!", detail: `${e.power}x was too much power`, tone: "bad", scene: scene({ kind: "ko", side: e.side, you: [10, 0], them: [10, 10], title: "K.O.!", detail: `${e.power}x was too much power` }) }, "lose");
+        say({ title: "busted!", detail: `${e.power}x was too much power`, tone: "bad", scene: scene({ kind: "ko", side: e.side, you: [10, 0], them: [10, 10], title: "busted!", detail: `${e.power}x was too much power` }) }, "lose");
       } else if (e.what === "zap") {
         const title = "banished!";
         const detail = e.idle ? "no call this round" : "weakest still standing";
@@ -280,7 +280,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     (): Mark[] =>
       fighters
         .filter((f) => f.out)
-        .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "KO" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt })),
+        .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "BUSTED" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt })),
     [fighters],
   );
   const yours: Yours = {
@@ -420,7 +420,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         <div className="orders">
           {me.out ? (
             <div className="out">
-              <b>{me.out.by === "ko" ? "you were knocked out" : "you were banished"}</b>
+              <b>{me.out.by === "ko" ? "you got busted" : "you were banished"}</b>
               <span className="dim">{game.over ? "" : "watch the rest, or"}</span>
               <button className="plain" onClick={onAgain}>
                 haunt again
@@ -472,7 +472,7 @@ function Debrief({ game, onAgain, onLeave }: { game: Game; onAgain: () => void; 
     <div className="debrief" role="dialog" aria-label="The result">
       <Spirit role={me.role} mood={place === 1 ? "happy" : me.out ? "ko" : made >= 0 ? "happy" : "hurt"} className="portrait" />
       <div>
-        <h2>{me.out ? (me.out.by === "ko" ? "knocked out" : "banished") : place === 1 ? "champion!" : `${fmt.ordinal(place)} place`}</h2>
+        <h2>{me.out ? (me.out.by === "ko" ? "busted" : "banished") : place === 1 ? "champion!" : `${fmt.ordinal(place)} place`}</h2>
         <p>
           {fmt.money(me.stake)} &rarr; <b>{fmt.money(value)}</b>{" "}
           <span className={made > 0 ? "good" : made < 0 ? "bad" : "dim"}>
@@ -524,7 +524,7 @@ const BOOK_SIDE: Record<Side, L3Side> = { long: "buy", short: "sell" };
 const FEARS = ["whisper", "howl", "shriek"];
 // How many graves each digs, and so how many ghosts rise when they spring.
 const COUNTS = [4, 8, 12];
-const FEAR_TIPS = ["The least power this round allows: hardest to knock out", "Halfway between", "The most power the market allows: the biggest swings"];
+const FEAR_TIPS = ["The least power this round allows: hardest to bust", "Halfway between", "The most power the market allows: the biggest swings"];
 
 function useCandles(game: Game, ticks: Tick[], mark: { p: number; at: number } | null): Candle[] {
   const kind = KINDS[game.kind];

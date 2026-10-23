@@ -25,7 +25,7 @@ const kOf = (scale: string) => (scale === "none" ? 1 : parseFloat(scale) || 1);
 const arrows = (text: string) => text.split(/([▲▼])/).map((bit, i) => (i % 2 ? <b key={i} className={s.arrow}>{bit}</b> : bit));
 
 function stateOf(f: Fighter, ready: boolean): [string, Tone] {
-  if (f.out) return f.out.by === "ko" ? ["K.O.", "ko"] : ["banished", "zap"];
+  if (f.out) return f.out.by === "ko" ? ["busted", "ko"] : ["banished", "zap"];
   if (f.call) return [`${f.call.side === "long" ? "▲" : "▼"} ${f.call.power}x`, f.call.side];
   if (f.trap) return f.trap.side === "long" ? ["graves ▲", "ambushLong"] : ["graves ▼", "ambushShort"];
   return ready ? ["ready", "ready"] : ["idle", "idle"];
@@ -100,7 +100,7 @@ export const Board = memo(function Board({ game, round, waiting }: Props) {
     gone.current = out;
     if (reduced()) return;
     fresh.forEach((el, i) => enter(el, first ? i * 45 : 0));
-    // A knockout lands where it happened before the board closes over it.
+    // A bust lands where it happened before the board closes over it.
     moves.forEach((m) => slide(m.el, m.dy, m.k, m.far, fell ? 420 : 0));
   }, [order]);
 

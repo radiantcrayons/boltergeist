@@ -7,7 +7,7 @@ lantern, creeping east across a field at dusk, north when it rises and south whe
 trail they leave is the chart. Pick a haunt and a ghost, then dig your graves: a line of them below the kids
 to go long, north of them to go short, all in, with as much power as you dare. When the kids stray onto your
 graves your ghosts swirl up out of them, you're in, and Strike pays you to be. Each round raises the least power you can call
-with. Let the kids walk far enough back through your ghosts and they fade away, and you're knocked out. The
+with. Let the kids walk far enough back through your ghosts and they fade away, and you're busted. The
 biggest gain at the final bell wins.
 
 Boltergeist is a trading game that runs on Strike's live markets, built around Strike's maker rebate. An
@@ -90,10 +90,10 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
   get in, its taker fee for closing at the market, and the builder fee when one is set. It starts below
   zero, so holding on is the default. **Your funds** are what you have, the way Strike shows equity. A
   thundercloud closes as a maker and earns the rebate instead.
-- **K.O.** Calls are knocked out where Strike would liquidate them. The further the kids walk back through
-  your ghosts the fainter they get, and at the K.O. price they're gone: it takes your whole stack and you're out.
+- **Busted.** Calls are busted where Strike would liquidate them. The further the kids walk back through
+  your ghosts the fainter they get, and at the bust price they're gone: it takes your whole stack and you're out.
 - **No one is put out for waiting.** Rounds only raise the floor on power; nobody is eliminated at a
-  round's end, so your graves can wait as long as it takes. The only way out before the bell is a K.O.
+  round's end, so your graves can wait as long as it takes. The only way out before the bell is getting busted.
 - **The final bell.** Whatever is still in a call comes out at the price. The biggest gain left standing is
   champion; then those who went out, the last to go first. Badges for a win, for surviving, and for
   critical hits. The debrief shows what you added to Strike's book and earned in maker rebates.
@@ -103,7 +103,7 @@ Keys: `escape` fills in your graves, `space` gives up the ghost, `left` `right` 
 **Everyone in one game.** Every haunt has ten seats, and everyone who joins it is in the same one, on
 the same board: players on paper, players live on Strike (tagged live), and, in the seats nobody takes,
 players the game runs (tagged bot). The bots dig graves and summon thunderclouds, now and then swoop in, give up and
-get knocked out like everyone else, and they're seeded by the haunt, so every player sees the same bots make
+get busted like everyone else, and they're seeded by the haunt, so every player sees the same bots make
 the same calls. The board beside the field moves as it happens. Pick your name under the haunt button.
 
 A game carries on when you go back to the start or close the page: open it again and it catches up on what
@@ -112,7 +112,7 @@ happened from Strike's candles and the game's record of everyone's moves.
 ### How the shared game works
 
 Each player's browser runs the whole haunt itself, from Strike's prices. What it can't know is what the
-other players do, so each call, exit and K.O. goes to a small record of moves for that haunt, kept in
+other players do, so each call, exit and bust goes to a small record of moves for that haunt, kept in
 DynamoDB by `app/api/arenas`, and every browser in the haunt reads it back every second and a half and
 plays the moves in at the times they were made. The server stamps each move with its own time and checks
 the price it was made at against Strike's mark price, so nobody can call at a price that wasn't there.
@@ -142,8 +142,8 @@ a call can only ever lose its stake.
   once, at that price or better, and as a taker, so the game counts the fee Strike charged.
 - **Giving up the ghost** closes reduce-only at the market, as a taker, and any thundercloud out comes off first.
 
-Where a call went in and where it's knocked out are Strike's. The final bell takes off anything still
-resting and closes what's open. A position Strike liquidates knocks you out of the game. The
+Where a call went in and where it's busted are Strike's. The final bell takes off anything still
+resting and closes what's open. A position Strike liquidates busts you out of the game. The
 bots stay pretend. Boltergeist adds no fee of its own to anything.
 
 Every request is signed in the browser with Ed25519 and sent straight to Strike: there is no server in
@@ -171,7 +171,7 @@ without nonces; nothing on the site writes HTML from data.
 | Checking every move's price in the shared game | `GET /price/v2/markPrice` |
 | The order book, order by order: the hands and your place in line | L3: `GET /v2/l3/snapshot` (through `/api/l3`, as it has no CORS headers), then WebSocket `/ws/l3`, channel `{symbol}@l3`, each update in sequence |
 
-Calls are knocked out on the **mark price**, the same price Strike liquidates on.
+Calls are busted on the **mark price**, the same price Strike liquidates on.
 
 ## Run it
 
@@ -231,7 +231,7 @@ The firewall rate limits the game's routes and the order book route per address.
 
 | Path | What |
 | --- | --- |
-| `lib/game/war.ts` | The game: the haunt clock and each haunt's market, the lobby, rounds, floors, calls with Strike's fees and liquidation, giving up, K.O.s, seeded bots, the final bell, standings |
+| `lib/game/war.ts` | The game: the haunt clock and each haunt's market, the lobby, rounds, floors, calls with Strike's fees and liquidation, giving up, busts, seeded bots, the final bell, standings |
 | `lib/game/useWar.ts` | Your games in the browser, moved on by each price, the clock and the other players' moves, caught up on opening |
 | `lib/online.ts`, `lib/server/arenas.ts`, `app/api/arenas/` | The shared game: who's in each haunt and the record of their moves |
 | `infra/` | The AWS stack: the game's tables, the Vercel roles, the budget and alarm |

@@ -246,7 +246,7 @@ export function Base({ games, markets, marks, tickers, live, available, nickname
                   {KINDS[g.kind].name} <span className="dim">{g.symbol.replace(/-USD$/, "")}</span> {ROLES[me.role].hero}
                 </span>
                 <span className="dim">{waiting ? `starts in ${fmt.clock(g.startsAt - now)}` : `${fmt.clock(g.endsAt - now)} left`}</span>
-                <span>{me.out ? (me.out.by === "ko" ? "K.O." : "banished") : fmt.money(worth(me, g.price))}</span>
+                <span>{me.out ? (me.out.by === "ko" ? "busted" : "banished") : fmt.money(worth(me, g.price))}</span>
                 <span className="dim">{waiting ? `${g.fighters.length}/${SEATS} in` : `${fmt.ordinal(placeOf(g, YOU))} of ${g.fighters.length}`}</span>
                 <span className="go-to">return &rarr;</span>
               </button>
@@ -279,7 +279,7 @@ export function Base({ games, markets, marks, tickers, live, available, nickname
                     <span>
                       {KINDS[g.kind].name} <span className="dim">{g.symbol.replace(/-USD$/, "")}</span> {ROLES[me.role].hero}
                     </span>
-                    <span className="dim">{me.out ? `${me.out.by === "ko" ? "K.O." : "banished"}, ${fmt.ordinal(placeOf(g, YOU))}` : `${fmt.ordinal(placeOf(g, YOU))} of ${g.fighters.length}`}</span>
+                    <span className="dim">{me.out ? `${me.out.by === "ko" ? "busted" : "banished"}, ${fmt.ordinal(placeOf(g, YOU))}` : `${fmt.ordinal(placeOf(g, YOU))} of ${g.fighters.length}`}</span>
                     <span className={made > 0 ? "good" : made < 0 ? "bad" : "dim"}>
                       {fmt.money(worth(me, g.price) - me.stake, true)} <span className="dim">{fmt.gain(made)}</span>
                     </span>

@@ -58,7 +58,7 @@ const quiet = (): Game => {
 const me = (g: Game) => g.fighters.find((f) => f.id === YOU)!;
 const at = (p: number) => ({ h: p, l: p, c: p });
 
-test("a call pays the taker fee each way and is knocked out where its margin runs out", () => {
+test("a call pays the taker fee each way and is busted where its margin runs out", () => {
   const c = opening("long", 10, 100, 50, now);
   near(c.fee, 0.25);
   near(c.koAt, 90.05 / 0.995);
@@ -98,7 +98,7 @@ test("giving up near the best price a call saw, for a good profit, is a critical
   assert.equal(h.feed[0].crit, false);
 });
 
-test("a call the price reaches the KO level of is knocked out there", () => {
+test("a call the price reaches the bust level of is busted there", () => {
   let g = call(quiet(), "short", 20, now + 1000);
   const ko = me(g).call!.koAt;
   g = advance(g, { h: ko + 0.1, l: 100, c: 100 }, now + 2000);
@@ -184,7 +184,7 @@ test("a stake's most power is the highest leverage its position's margin tier al
   assert.equal(rulesFor([], 500).maxPower, 100);
 });
 
-test("a call is knocked out by its tier's maintenance margin and amount", () => {
+test("a call is busted by its tier's maintenance margin and amount", () => {
   const c = opening("long", 50, 100, 500, now, TIERS);
   const size = 250;
   near(c.koAt, (100 - (500 - 12.5 + 50) / size) / (1 - 0.01));
@@ -198,7 +198,7 @@ test("power is capped at the market's most, and the round's floor with it", () =
   assert.equal(leastPower(g, me(g), late), 5);
 });
 
-test("a live call goes by Strike: its entry and K.O. level, no K.O. until Strike says, and what it really came out with", () => {
+test("a live call goes by Strike: its entry and bust level, no bust until Strike says, and what it really came out with", () => {
   let g = call(quiet(), "long", 10, now + 1000, { entry: 101, fee: 0.3, koAt: 91.2, live: "tw-1", size: 4.95 });
   assert.equal(me(g).call?.entry, 101);
   assert.equal(me(g).call?.koAt, 91.2);
@@ -371,7 +371,7 @@ test("a full game runs again side by side: the same market and times under an id
 
 const taken = (g: Game) => (typeof g.seen === "object" ? g.seen.ids.length : g.seen);
 
-test("another player's call, bank and K.O. land as they made them, and their own moves aren't taken twice", () => {
+test("another player's call, give-up and bust land as they made them, and their own moves aren't taken twice", () => {
   const a = arena("battle");
   const log: Log = {
     players: [p("ann", now - 5000), p("me", now - 4000)],

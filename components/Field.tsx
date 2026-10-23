@@ -1366,7 +1366,7 @@ export function Field(props: Props) {
     }
     stamp();
 
-    // A line across the ground where you'd be knocked out.
+    // A line across the ground where you'd be busted.
     if (yours.call && onMap(yOf(yours.call.koAt))) {
       const yk = yOf(yours.call.koAt);
       line(ctx, S(Math.max(X(yours.call.at), ext.x0), yk), S(ext.x1, yk), css(CLAY.steelDark, 0.8), 1.4);
@@ -1796,7 +1796,7 @@ export function Field(props: Props) {
     if (yours.call) {
       const call = yours.call;
       const ya = yOf(call.entry);
-      // The further the kids walk on through your ghosts, the more of them they wear away: all gone at your K.O. price.
+      // The further the kids walk on through your ghosts, the more of them they wear away: all gone at your bust price.
       const wrong = call.side === "long" ? call.entry - live : live - call.entry;
       const hurt = clamp(wrong / (Math.abs(call.entry - call.koAt) || 1), 0, 1);
       const go = ease((now - call.at) / (call.maker ? 900 : 1600));
@@ -1832,7 +1832,7 @@ export function Field(props: Props) {
         });
       }
       const yk = yOf(call.koAt);
-      if (onMap(yk)) labels.push(() => marking(`K.O. ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), COLORS.down));
+      if (onMap(yk)) labels.push(() => marking(`BUSTED ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), COLORS.down));
     }
     if (yours.flag && yf !== null) {
       const banks = yours.flag.banks;
@@ -2168,7 +2168,7 @@ export function Field(props: Props) {
     words.setTransform(field.getTransform());
     ctx = words;
 
-    // Who's been knocked out, where it happened.
+    // Who's been busted, where it happened.
     for (const mk of marks) {
       const x = X(mk.t);
       const y = yOf(mk.p);
@@ -2279,7 +2279,8 @@ export function Field(props: Props) {
       frame = requestAnimationFrame(loop);
       if (t - looked > 400) {
         looked = t;
-        covered = !!document.querySelector(".debrief, .modal, .cutscene");
+        // Only the game's own dialogs count: a browser extension's own .modal must never stop the field.
+        covered = !!document.querySelector(".app .debrief, .app > .modal, .app .cutscene");
       }
       if (document.hidden || !shown || covered) return;
       try {

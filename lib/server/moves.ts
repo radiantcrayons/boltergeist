@@ -130,11 +130,11 @@ export async function rule(kind: Kind, was: State, body: Record<string, unknown>
       return { move: { what: "bank", price, ...(atFlag && { flag: price }) }, state };
     }
     case "ko": {
-      if (!was.call) throw new Refused("Nothing to knock out", 409);
+      if (!was.call) throw new Refused("Nothing to bust", 409);
       delete state.call;
       return { move: { what: "ko", price: num(body.price) }, state: { ...state, out: true } };
     }
     default:
-      throw new Refused("Call, graves, thundercloud, give up or K.O.?");
+      throw new Refused("Call, graves, thundercloud, give up or bust?");
   }
 }
