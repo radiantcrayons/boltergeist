@@ -6,7 +6,7 @@ import { play } from "@/lib/sfx";
 import type { Role, Side } from "@/lib/game/war";
 import type { Candle } from "@/lib/types";
 import { COLORS, niceStep, type Mark, type Pick, type Pin } from "./marks";
-import { ANGLES, KIDS_LEAD, kidsLantern, kidsTorch, paintCloud, paintKids, paintSpook, paintZombie, type Figure, type GhostKind } from "./clay";
+import { ANGLES, KIDS_LEAD, kidsTorch, paintCloud, paintKids, paintSpook, paintZombie, type Figure, type GhostKind } from "./clay";
 import { GHOST_KIND } from "./Spirit";
 import { paintTree } from "./trees";
 
@@ -274,6 +274,9 @@ function wordOf(text: string, font: string, color: string, scale: number) {
 // to nothing at the rim. The coin's own symbol where there is one, its letters where there isn't.
 const SIGNAL = 256;
 const SOLID = 0.62;
+// How many tiles across the signal lies on the ground, and how many motes drift down the beam to it.
+const SIGNAL_TILES = 2.2;
+const MOTES = 16;
 const INKED = "rgb(26, 20, 34)";
 const COINS = new Set(["ada", "bnb", "btc", "doge", "eth", "sol", "xrp", "zec"]);
 const signals = new Map<string, { pool: HTMLCanvasElement; mark: HTMLCanvasElement }>();
@@ -447,7 +450,7 @@ function figure(key: string, make: () => Figure): Figure {
 const GHOSTS: Record<Side, RGB> = { long: [124, 232, 192], short: [124, 232, 192] };
 const FIELD_SIZE: Record<GhostKind, number> = { wisp: 0.95, spectre: 1.1, poltergeist: 1.3 };
 const FRAMES = 8;
-// The kids walk a little behind the price, so their torch lights the ground where it is.
+// The kids walk a step behind the price, so their torch's beam reaches out to the coin's signal on the price itself.
 const KIDS_BACK = (KIDS_LEAD * 2.05) / 26;
 // Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
 const WORDS = 1.45;
@@ -455,42 +458,19 @@ const WORDS = 1.45;
 const WORD = 0.4;
 const SET = 0.72;
 
-// A torch's beam: a soft cone of warm light, drawn once and laid from the torch to where it shines.
-let beamCone: HTMLCanvasElement | null = null;
-function beam() {
-  if (beamCone) return beamCone;
-  const c = document.createElement("canvas");
-  c.width = 256;
-  c.height = 128;
-  const g = c.getContext("2d")!;
-  g.filter = "blur(5px)";
-  const fall = g.createLinearGradient(8, 0, 244, 0);
-  fall.addColorStop(0, "rgba(255, 240, 200, 0.95)");
-  fall.addColorStop(1, "rgba(255, 214, 150, 0.3)");
-  g.fillStyle = fall;
-  g.beginPath();
-  g.moveTo(8, 60);
-  g.lineTo(236, 18);
-  g.quadraticCurveTo(252, 64, 236, 110);
-  g.lineTo(8, 68);
-  g.closePath();
-  g.fill();
-  beamCone = c;
-  return c;
-}
 const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px));
 const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant));
 // The kids turn as they climb and drop: sixteen steps across the half turn from north through east to south, plus straight east.
 const KID_TURNS = 16;
 const kidTurn = (i: number) => (i / KID_TURNS - 0.5) * Math.PI;
 const kidPose = (turn: number) => Math.round((turn / Math.PI + 0.5) * KID_TURNS);
-// They face where the price is going before they walk there: the torch swings round first, the body follows the torch, and they
-// step off once they're mostly round, quicker the further round they are. A move smaller than a tick's noise doesn't turn them,
-// and they keep facing a climb or a drop a moment after each step, so a run of ticks doesn't flick them back east between steps.
+// They face where the price is going before they walk there (the coin's signal goes on ahead with the price, and the torch's beam
+// swings after it), and step off once they're mostly round, quicker the further round they are. A move smaller than a tick's noise doesn't turn them.
+// East is their way: they turn back to it as soon as they've caught the price, past only the gaps between the ticks of a steady
+// climb or fall (under TURN_BRIDGE ms), so a run of ticks doesn't flick them back and forth.
 const TURN_NOISE = 0.12;
 const TURN_STEP = 500;
-const TURN_RELAX = 500;
-const TORCH_TURN = { ease: 35, rate: 1400 };
+const TURN_BRIDGE = 150;
 const BODY_TURN = { ease: 70, rate: 720 };
 const WALK_ROUND = Math.PI / 4;
 // A turn eased toward an angle over a frame of dt ms, but never faster than rate degrees a second.
@@ -1018,7 +998,7 @@ export function Field(props: Props) {
     hands: Map<string, Hand>;
     col: number;
     struck: number;
-    gait: { walked: number; y: number; at: number; aim: number; torch: number; turn: number; pose: number; pace: number };
+    gait: { walked: number; y: number; price: number; at: number; aim: number; quiet: number; turn: number; pose: number; pace: number };
     rain: Float32Array | null;
   }>({
     past: [],
@@ -1028,7 +1008,7 @@ export function Field(props: Props) {
     hands: new Map(),
     col: 0,
     struck: 0,
-    gait: { walked: 0, y: 0, at: 0, aim: 0, torch: 0, turn: 0, pose: KID_TURNS / 2, pace: 1 },
+    gait: { walked: 0, y: 0, price: 0, at: 0, aim: 0, quiet: 0, turn: 0, pose: KID_TURNS / 2, pace: 1 },
     rain: null,
   });
   const grass = useRef<{ c: HTMLCanvasElement | null; x0: number; y0: number; w: number; h: number; n: number }>({ c: null, x0: 0, y0: 0, w: 0, h: 0, n: 0 });
@@ -1224,10 +1204,13 @@ export function Field(props: Props) {
       g.ref = target;
       g.shown = target;
       g.cy = 0;
+      memory.current.gait.price = target;
     }
-    // The kids carry the price, and they turn to face a move before they make it: the price shown waits on how far round they are.
-    const pace = memory.current.gait.pace;
-    g.shown = reduced() ? target : g.shown + (target - g.shown) * (1 - Math.exp(-(Math.min(at - g.at, 50) * pace) / 110));
+    g.shown = reduced() ? target : g.shown + (target - g.shown) * (1 - Math.exp(-Math.min(at - g.at, 50) / 110));
+    // The kids carry the price, but they turn to face a move before they make it: their own row waits on how far round they are,
+    // while the price's trail and the coin's signal on the end of it go on ahead.
+    const gait = memory.current.gait;
+    gait.price = reduced() ? target : gait.price + (target - gait.price) * (1 - Math.exp(-(Math.min(at - g.at, 50) * gait.pace) / 110));
     const live = g.shown;
     g.lag = target - live;
     const worldY = (p: number) => (g.ref - p) / g.rowSize;
@@ -1241,6 +1224,7 @@ export function Field(props: Props) {
     const k = A / 26;
     const walk = reduced() ? 0 : at / 110;
     const y0 = yOf(live);
+    const ky = yOf(gait.price);
     const nowX = now / intervalMs;
     // The land runs on past every edge of the view: how much of it the screen takes in, and whether a point is on screen.
     const corners = [
@@ -1835,7 +1819,7 @@ export function Field(props: Props) {
     // its full size figure at every turn, made ahead a few a frame while the graves wait, so the swirl never stops to make them.
     const kx = -KIDS_BACK;
     const facing = (x: number, y: number) => {
-      const a = Math.atan2(y0 - y, kx - x) - Math.PI / 4;
+      const a = Math.atan2(ky - y, kx - x) - Math.PI / 4;
       return ((Math.round((a / (Math.PI * 2)) * ANGLES) % ANGLES) + ANGLES) % ANGLES;
     };
     // While the graves wait, the rise's every turn and the walk the ghosts will take facing the kids are made between frames.
@@ -1964,8 +1948,7 @@ export function Field(props: Props) {
 
     // The kids: the price. They walk as far as the ground moves under them and the price carries them, a full stride to every half
     // a tile, so their feet keep to the ground; with the ground near still they stand and tremble. They jump when your ghosts spring.
-    const gait = m.gait;
-    const wy = worldY(live);
+    const wy = worldY(gait.price);
     const dt = gait.at ? Math.min(at - gait.at, 100) : 0;
     const moved = Math.hypot(dt / intervalMs, wy - gait.y);
     gait.walked += moved;
@@ -1974,9 +1957,9 @@ export function Field(props: Props) {
     const still = reduced() || moved < dt * 0.00005;
     const strideNow = reduced() ? 0 : Math.floor(((gait.walked / 0.5) % 1) * STRIDES);
     const tremble = still && !reduced() ? Math.sin(at / 37) * 0.5 : 0;
-    // They walk a step behind the price, its pool of light on the ground ahead of them where the middle one's torch shines.
+    // They walk a step behind the price, the coin's signal on the ground ahead of them where the middle one's torch shines.
     shadows.push(() => {
-      const p = S(kx, y0);
+      const p = S(kx, ky);
       blob(ctx, p.x, p.y, 0.8 * A, 0.36 * A, [92, 108, 136], 0.55);
     });
     const jump = Math.sin(spooked * Math.PI) * 14 * k;
@@ -1985,11 +1968,11 @@ export function Field(props: Props) {
     // turn), read as a pace in rows a second against the ground's tile a candle.
     const gap = worldY(target) - wy;
     const pull = reduced() || Math.abs(gap) < TURN_NOISE ? 0 : gap / (TURN_STEP / 1000);
+    if (pull) gait.quiet = 0;
+    else if ((gait.quiet += dt) > TURN_BRIDGE) gait.aim = 0;
     if (pull && (Math.sign(pull) !== Math.sign(gait.aim) || Math.abs(pull) >= Math.abs(gait.aim))) gait.aim = pull;
-    else gait.aim += (pull - gait.aim) * (1 - Math.exp(-dt / TURN_RELAX));
     const heading = clamp(Math.atan2(gait.aim, 1000 / intervalMs), -Math.PI / 2, Math.PI / 2);
-    gait.torch = reduced() ? 0 : turnTo(gait.torch, heading, dt, TORCH_TURN);
-    gait.turn = reduced() ? 0 : turnTo(gait.turn, gait.torch, dt, BODY_TURN);
+    gait.turn = reduced() ? 0 : turnTo(gait.turn, heading, dt, BODY_TURN);
     const round = clamp(1 - Math.abs(heading - gait.turn) / WALK_ROUND, 0, 1);
     gait.pace = Math.abs(gap) < TURN_NOISE ? 1 : round * round * (3 - 2 * round);
     const toward = kidPose(gait.turn);
@@ -2001,18 +1984,17 @@ export function Field(props: Props) {
     }
     kidsSoon(kidPx, gait.pose);
     const kidsNow = kidsAt(kidPx, strideNow, gait.pose);
-    casters.push({ x: kx, y: y0, z: jump, shape: () => shapeOf(kidsNow, dpr) });
+    casters.push({ x: kx, y: ky, z: jump, shape: () => shapeOf(kidsNow, dpr) });
     let torch: Pt | null = null;
-    put(kx, y0, () => {
-      const p = S(kx, y0, jump);
+    put(kx, ky, () => {
+      const p = S(kx, ky, jump);
       p.x += tremble;
       const f = kidsNow;
       ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
-      const lamp = kidsLantern(2.05 * k, kidTurn(gait.pose));
-      glows.push({ p: { x: p.x + lamp.x, y: p.y + lamp.y }, r: 3.2 * A, rgb: "255, 196, 120", a: 0.5 });
+      // The torch is the one light about them: no glow round the eldest's lantern, so the beam reads.
       const lens = kidsTorch(2.05 * k, kidTurn(gait.pose));
       torch = { x: p.x + lens.x, y: p.y + lens.y };
-      glows.push({ p: torch, r: 0.35 * A, rgb: "255, 236, 190", a: 0.7 });
+      glows.push({ p: torch, r: 0.4 * A, rgb: "255, 236, 190", a: 0.8 });
     });
     ctx.globalCompositeOperation = "multiply";
     shadows.forEach((fn) => fn());
@@ -2130,38 +2112,62 @@ export function Field(props: Props) {
         glows.push({ p: { x: fx, y: fy }, r: 7, rgb: "222, 255, 150", a: 0.75 * blink * dry });
       }
     }
-    // Where the torch lands, a step ahead of them: on the price itself while they walk east, swung round with the torch as they turn.
-    const lamp = S(kx + Math.cos(gait.torch) * KIDS_BACK, y0 + Math.sin(gait.torch) * KIDS_BACK);
-    shine(ctx, lamp.x, lamp.y, 2.6 * A, 1.3 * A, "255, 186, 104", 0.3, false);
-    // The coin, like a signal in the sky: a soft pool of lantern light on the ground under the kids with the market's mark cut out of it.
-    const mark0 = coin ? signalOf(coin) : null;
-    if (mark0) {
-      const f = (A * 2.2) / SIGNAL;
-      ctx.save();
-      ctx.setTransform(dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2, dpr * lamp.x, dpr * lamp.y);
-      ctx.globalAlpha = 0.55;
-      ctx.drawImage(mark0.pool, -SIGNAL / 2, -SIGNAL / 2);
-      ctx.globalCompositeOperation = "source-over";
-      ctx.globalAlpha = 0.82;
-      ctx.drawImage(mark0.mark, -SIGNAL / 2, -SIGNAL / 2);
-      ctx.restore();
-      ctx.globalCompositeOperation = "lighter";
-    }
+    // The coin's signal sits on the price itself, centred on the end of its trail, and the torch's beam reaches out to it from the
+    // kids a step behind: a soft shaft opening to the signal's width, motes drifting down it. Beam first, so the coin stays dark.
+    const lamp = S(0, y0);
+    shine(ctx, lamp.x, lamp.y, 2.6 * A, 1.3 * A, "255, 186, 104", 0.2, false);
     const lens = torch as Pt | null;
     if (lens) {
       const dx = lamp.x - lens.x;
       const dy = lamp.y - lens.y;
       const L = Math.hypot(dx, dy);
       if (L > 2) {
-        ctx.save();
-        ctx.translate(lens.x, lens.y);
-        ctx.rotate(Math.atan2(dy, dx));
-        ctx.globalAlpha = 0.42;
-        const sx = L / 228;
-        const sy = (0.75 * A) / 46;
-        ctx.drawImage(beam(), -8 * sx, -64 * sy, 256 * sx, 128 * sy);
-        ctx.restore();
+        // Across the beam, the signal's half width that way: on the screen it's an ellipse SIGNAL_TILES across and half as tall.
+        const nx = -dy / L;
+        const ny = dx / L;
+        const rx = (Math.SQRT2 * SIGNAL_TILES * A) / 2;
+        const w = 0.95 * Math.hypot(rx * nx, (rx / 2) * ny);
+        const w0 = 0.07 * A;
+        const fall = ctx.createLinearGradient(lens.x, lens.y, lamp.x, lamp.y);
+        fall.addColorStop(0, "rgba(255, 240, 200, 0.3)");
+        fall.addColorStop(1, "rgba(255, 214, 150, 0.14)");
+        ctx.fillStyle = fall;
+        ctx.filter = "blur(4px)";
+        ctx.beginPath();
+        ctx.moveTo(lens.x + nx * w0, lens.y + ny * w0);
+        ctx.lineTo(lamp.x + nx * w, lamp.y + ny * w);
+        ctx.lineTo(lamp.x - nx * w, lamp.y - ny * w);
+        ctx.lineTo(lens.x - nx * w0, lens.y - ny * w0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.filter = "none";
+        // Each mote drifts from the torch to the signal at its own pace, somewhere new across the beam each time it sets off.
+        if (!reduced()) {
+          for (let n = 0; n < MOTES; n++) {
+            const run = (at / 1000) * (0.25 + hash(n * 1.3) * 0.3) + hash(n * 5.1);
+            const u = run - Math.floor(run);
+            const across = (hash(n * 7 + Math.floor(run)) * 2 - 1) * 0.85 * (w0 + (w - w0) * u);
+            ctx.fillStyle = `rgba(255, 236, 196, ${0.75 * Math.sin(Math.PI * u)})`;
+            ctx.beginPath();
+            ctx.arc(lens.x + dx * u + nx * across, lens.y + dy * u + ny * across, 0.95 * k, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
+    }
+    // The coin, like a signal in the sky: a soft pool of the torch's light with the market's mark cut out of it.
+    const mark0 = coin ? signalOf(coin) : null;
+    if (mark0) {
+      const f = (A * SIGNAL_TILES) / SIGNAL;
+      ctx.save();
+      ctx.setTransform(dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2, dpr * lamp.x, dpr * lamp.y);
+      ctx.globalAlpha = 0.5;
+      ctx.drawImage(mark0.pool, -SIGNAL / 2, -SIGNAL / 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 0.82;
+      ctx.drawImage(mark0.mark, -SIGNAL / 2, -SIGNAL / 2);
+      ctx.restore();
+      ctx.globalCompositeOperation = "lighter";
     }
     for (const glow of [...glows, ...flashes]) if (glow.a >= 0.05) shine(ctx, glow.p.x, glow.p.y, glow.r, glow.r, glow.rgb, glow.a, true);
     ctx.globalCompositeOperation = "source-over";
@@ -2261,7 +2267,7 @@ export function Field(props: Props) {
     }
 
     labels.forEach((fn) => fn());
-    // The price, marked on the ground just south of the kids' feet.
+    // The price, marked on the ground just south of the coin's signal.
     marking(fmt.price(target, tickSize), 0, y0 + 1.05, "#f4f8f6", { align: "center", alpha: SET });
 
     const hovered = hover.current ? priceUnder(hover.current.x, hover.current.y) : null;

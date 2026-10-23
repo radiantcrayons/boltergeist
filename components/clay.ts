@@ -449,8 +449,9 @@ function kidsLantern3(bob: number): { hand: V; lamp: V } {
   return { hand, lamp: [hand[0] + 0.1, hand[1], hand[2] - 2] };
 }
 
-// How far ahead of the children's feet, in model units, the middle one's torch lights the ground: where the price is.
-export const KIDS_LEAD = 7;
+// How far ahead of the children's feet, in model units, the middle one's torch lights the ground: where the price is, a tile and a
+// quarter on at the field's 2.05 px a unit for every 26 of a tile.
+export const KIDS_LEAD = (1.25 * 26) / 2.05;
 const TORCH: RGB = [70, 74, 88];
 
 // Where the middle child's hand is, and the torch in it shining ahead and down onto the ground.
