@@ -1,0 +1,4 @@
+/infra
+/deploy
+/.env*
+!/.env.example

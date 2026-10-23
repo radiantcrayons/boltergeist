@@ -1,0 +1,502 @@
+"use client";
+
+import { useEffect, useEffectEvent, useMemo, useRef, useState, type CSSProperties } from "react";
+import * as fmt from "@/lib/format";
+import { candlesFrom, type Tick } from "@/lib/game/ticks";
+import type { War } from "@/lib/game/useWar";
+import { useBook } from "@/lib/live/book";
+import { ahead, join, key as bookKey, levels as bookLevels, type L3Side } from "@/lib/live/l3";
+import { BUILDER } from "@/lib/live/session";
+import {
+  breakEven,
+  KINDS,
+  koDistance,
+  leastPower,
+  moveOf,
+  opening,
+  placeOf,
+  ROLES,
+  roundAt,
+  roundEnds,
+  rulesOf,
+  standingCount,
+  STRIKE,
+  valueOf,
+  worth,
+  YOU,
+  type Event,
+  type Game,
+  type Side,
+} from "@/lib/game/war";
+import { play, type Sound } from "@/lib/sfx";
+import { recall, remember } from "@/lib/store";
+import { klines } from "@/lib/strike";
+import type { Candle } from "@/lib/types";
+import { COLORS, type Mark, type Pick, type Pin } from "./Chart";
+import { Cutscene, type Scene } from "./Cutscene";
+import { Board } from "./Board";
+import { Field, type Yours } from "./Field";
+import { Spirit } from "./Spirit";
+
+
+type Moment = { title: string; detail?: string; tone: "good" | "bad" | "plain"; scene?: Scene; n: number };
+
+type Props = {
+  game: Game;
+  mark: { p: number; at: number } | null;
+  tickSize: number;
+  ticks: Tick[];
+  war: War;
+  scenes: boolean;
+  onAgain: () => void;
+  onLeave: () => void;
+};
+
+export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLeave }: Props) {
+  const kind = KINDS[game.kind];
+  const me = game.fighters.find((f) => f.id === YOU)!;
+  const role = ROLES[me.role];
+  const stake = me.stake;
+  const [nowMs, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(timer);
+  }, []);
+  const [fear, setFear] = useState(() => Math.min(2, Math.max(0, Math.round(recall("fear", 1)))));
+  useEffect(() => remember("fear", fear), [fear]);
+  // A fight opens at the top, with the field in view, wherever the base was scrolled to.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [game.id]);
+  const candles = useCandles(game, ticks, mark);
+  const value = worth(me, game.price);
+  const made = value - stake;
+  const round = roundAt(game, Math.min(nowMs, game.endsAt - 1));
+  const rounds = kind.floors.length;
+  const most = rulesOf(game).maxPower;
+  const least = Math.min(leastPower(game, { ...me, cash: value }, nowMs), most + 1);
+  // Three ways to haunt: the least power this round allows, the most the market allows, and halfway between on a log scale.
+  const lo = Math.min(least, most);
+  const tiers = [lo, Math.min(most, Math.max(lo, Math.round(Math.sqrt(lo * most)))), most];
+  const charge = me.call ? me.call.power : tiers[fear];
+  const waiting = nowMs < game.startsAt;
+  const count = Math.ceil((game.startsAt - nowMs) / 1000);
+  const base = game.symbol.replace(/-USD$/, "");
+
+  const [moments, setMoments] = useState<Moment[]>([]);
+  const said = useRef(0);
+  const seen = useRef<Event | null | undefined>(undefined);
+  useEffect(() => {
+    const say = (m: Omit<Moment, "n">, sound: Sound) => {
+      play(sound);
+      const n = ++said.current;
+      setMoments((ms) => [...ms, { ...m, n, scene: m.scene && { ...m.scene, n } }]);
+    };
+    const scene = (s: Omit<Scene, "role" | "n">): Scene => ({ ...s, role: me.role, n: 0 });
+    const hpNow = Math.round((10 * worth(me, game.price)) / stake);
+    if (seen.current === undefined) {
+      seen.current = game.feed[0] ?? null;
+      return;
+    }
+    const fresh: Event[] = [];
+    for (const e of game.feed) {
+      if (seen.current && e.at === seen.current.at && e.who === seen.current.who && e.what === seen.current.what) break;
+      fresh.unshift(e);
+    }
+    seen.current = game.feed[0] ?? null;
+    for (const e of fresh) {
+      // The countdown on the field ends in a boo, so the start only needs its sound.
+      if (e.what === "start") {
+        play("arm");
+      } else if (e.what === "join") {
+        if (e.who !== "you") play("pick");
+      } else if (e.what === "trap") {
+        if (e.who === "you") play("earth");
+      } else if (e.what === "end") {
+        const p = placeOf(game, YOU);
+        if (me.out) say({ title: me.out.by === "ko" ? "knocked out" : "zapped", detail: `${fmt.ordinal(p)} of ${game.fighters.length}`, tone: "bad" }, "out");
+        else if (p === 1) say({ title: "champion!", detail: fmt.money(made, true), tone: "good", scene: scene({ kind: "victory", you: [hpNow, hpNow], them: [10, 0], title: "champion!", detail: fmt.money(made, true) }) }, "win");
+        else
+          say(
+            { title: `${fmt.ordinal(p)} place`, detail: fmt.money(made, true), tone: made >= 0 ? "good" : "bad", scene: scene({ kind: "end", you: [hpNow, hpNow], them: [10, 10], title: `${fmt.ordinal(p)} place`, detail: fmt.money(made, true) }) },
+            p <= 3 ? "enter" : "out",
+          );
+      } else if (e.who !== "you") {
+        if (e.what === "ko" || e.what === "zap") play("out");
+      } else if (e.what === "ko") {
+        say({ title: "K.O.!", detail: `${e.power}x was too much power`, tone: "bad", scene: scene({ kind: "ko", side: e.side, you: [10, 0], them: [10, 10], title: "K.O.!", detail: `${e.power}x was too much power` }) }, "lose");
+      } else if (e.what === "zap") {
+        const title = "zapped!";
+        const detail = e.idle ? "no call this round" : "weakest still standing";
+        say({ title, detail, tone: "bad", scene: scene({ kind: "zap", you: [hpNow, hpNow], them: [10, 10], title, detail }) }, "zap");
+      } else if (e.what === "bank") {
+        const gain = e.made ?? 0;
+        const hp = Math.max(0, Math.round(10 + (10 * gain) / (e.stake ?? stake)));
+        const move = e.move ?? 0;
+        const ate = !e.maker && gain < 0 && move >= 0.005;
+        const title = e.crit ? "critical hit!" : e.maker ? "struck!" : gain >= 0 ? "banked!" : ate ? "fees ate it" : "banked a loss";
+        const detail = ate ? `${fmt.money(move, true)} on the call, ${fmt.money(gain, true)} after Strike's fees` : fmt.money(gain, true);
+        say(
+          { title, detail, tone: gain >= 0 ? "good" : "bad", scene: scene({ kind: gain >= 0 ? "win" : "lose", side: e.side, you: [10, hp], them: [10, Math.max(0, Math.min(10, 20 - hp))], title, detail }) },
+          e.maker ? "thunder" : gain > 0 ? "ready" : "place",
+        );
+      } else {
+        const title = e.maker ? "your ghosts rise!" : `${e.what} ${e.power}x!`;
+        const paid = me.call?.maker && me.call.fee < 0 ? `Strike paid you ${fmt.fine(-me.call.fee)}` : "Strike paid you to get in";
+        const detail = e.maker ? `${e.what} ${e.power}x from ${fmt.price(e.price ?? 0, tickSize)}, and ${paid}` : e.what === "long" ? `${role.hero} says up` : `${role.hero} says down`;
+        say({ title, detail, tone: "plain", scene: scene({ kind: "call", side: e.what, you: [10, 10], them: [10, 10], title, detail }) }, "enter");
+      }
+    }
+  }, [game, stake, me, made, role.hero, tickSize]);
+  const moment = moments[0] ?? null;
+  const next = () => setMoments((ms) => ms.slice(1));
+  useEffect(() => {
+    if (!moment || (scenes && moment.scene)) return;
+    const timer = setTimeout(() => setMoments((ms) => ms.slice(1)), 1700);
+    return () => clearTimeout(timer);
+  }, [moment, scenes]);
+
+  // The last seconds before the start and before the bell, ticked off.
+  const ticked = useRef(-1);
+  useEffect(() => {
+    const s = Math.ceil(((waiting ? game.startsAt : game.endsAt) - nowMs) / 1000);
+    if (!game.over && s <= (waiting ? 3 : 5) && s > 0 && s !== ticked.current) {
+      ticked.current = s;
+      play("pick");
+    }
+  }, [nowMs, waiting, game.startsAt, game.endsAt, game.over]);
+
+  const can = !game.over && !me.out && !war.busy;
+  // Banking at the market carries the builder fee, if there is one; ambushes and flags don't.
+  const taker = STRIKE.taker + (game.live ? BUILDER.feeBps / 10_000 : 0);
+  const bankFee = me.call ? valueOf(me.call, game.price, 0) - valueOf(me.call, game.price, taker) : 0;
+  const even = me.call ? breakEven(me.call, taker) : 0;
+  const trap = me.trap ?? null;
+  const flag = me.call?.flag ?? trap?.flag;
+  // Strike's order book, order by order: where your ambush and your flag would stand in its line.
+  const l3 = useBook(game.symbol);
+  const trapSide = trap?.side;
+  const trapPrice = trap?.price;
+  const trapAt = trap?.at;
+  const holding = me.call?.side ?? trapSide;
+  const trapSize = trap?.live ? trap.size : undefined;
+  const inLine = useMemo(() => {
+    if (!l3.book || !trapSide || trapPrice === undefined || trapAt === undefined) return null;
+    const place = join(l3.book, BOOK_SIDE[trapSide], bookKey(trapPrice, tickSize));
+    // A live ambush is already on Strike by the time it's laid here: the last order in its line of its size is yours, not ahead of you.
+    const last = l3.book[place.side].get(place.price)?.at(-1);
+    if (trapSize && last && Math.abs(last.size - trapSize) <= trapSize * 0.01) place.ahead.delete(last.id);
+    return place;
+  }, [l3.book, trapSide, trapPrice, trapAt, trapSize, tickSize]);
+  const flagLine = useMemo(
+    () => (l3.book && holding && flag !== undefined ? join(l3.book, holding === "long" ? "sell" : "buy", bookKey(flag, tickSize)) : null),
+    [l3.book, holding, flag, tickSize],
+  );
+  const lineAhead = inLine && l3.book ? ahead(l3.book, inLine) : null;
+  const flagAhead = flagLine && l3.book ? ahead(l3.book, flagLine) : null;
+  const walls = l3.book
+    ? (["buy", "sell"] as const).flatMap((side) =>
+        bookLevels(l3.book!, side, 40).map((l) => ({ p: l.price, side: side === "buy" ? ("long" as const) : ("short" as const), orders: l.orders.map((o) => o.size * l.price) })),
+      )
+    : [];
+  const blasts = (l3.tape?.fills ?? []).filter((f) => nowMs - f.at < 900).map((f) => ({ p: Number(f.price), at: f.at }));
+  const bank = () => can && me.call && war.bank(game.id);
+  const sideOf = (p: number): Side => (p < game.price ? "long" : "short");
+  // A click takes the side of the price it lands on, then the nearest tick on that side, so one by the kids is never the price itself.
+  const onTick = (p: number) => {
+    const up = p >= game.price;
+    let at = (up ? Math.ceil : Math.floor)(p / tickSize - (up ? 1e-9 : -1e-9)) * tickSize;
+    if (up && at <= game.price) at += tickSize;
+    if (!up && at >= game.price) at -= tickSize;
+    return Number(at.toFixed(12));
+  };
+  const pick = (raw: number): Pick | null => {
+    if (!can || waiting) return null;
+    const side = sideOf(raw);
+    const p = onTick(raw);
+    if (me.call) {
+      if (side === me.call.side) return null;
+      return { p, label: `banks ${fmt.money(valueOf(me.call, p, STRIKE.maker) - me.call.stake, true)}`, color: COLORS.volt, art: "cloud" };
+    }
+    if (trap && side !== trap.side) return { p, label: "", color: COLORS.volt, art: "cloud" };
+    if (least > most) return null;
+    return { p, label: `${side} ${charge}x`, color: side === "long" ? COLORS.up : COLORS.down, art: { side, count: COUNTS[fear] } };
+  };
+  const onPick = (p: number) => {
+    if (me.call || (trap && sideOf(p) !== trap.side)) war.flag(game.id, p);
+    else war.trap(game.id, sideOf(p), charge, p);
+  };
+  // Changing the power with graves waiting digs them again at the new power, once the choice settles.
+  const relay = useEffectEvent(() => {
+    if (trap && !me.call && can && trap.power !== charge) war.trap(game.id, trap.side, charge, trap.price);
+  });
+  const trapPower = trap?.power;
+  useEffect(() => {
+    if (trapPower === undefined || trapPower === charge) return;
+    const timer = setTimeout(relay, 450);
+    return () => clearTimeout(timer);
+  }, [charge, trapPower]);
+  const onKey = useEffectEvent((e: KeyboardEvent) => {
+    if (e.target instanceof HTMLInputElement && e.key.startsWith("Arrow")) return;
+    const nudge = (by: number) => !me.call && setFear((f: number) => Math.min(2, Math.max(0, f + by)));
+    if (e.key === "Escape") war.pull(game.id);
+    else if (e.key === " ") bank();
+    else if (e.key === "ArrowLeft") nudge(-1);
+    else if (e.key === "ArrowRight") nudge(1);
+    else return;
+    e.preventDefault();
+  });
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => onKey(e);
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+
+  const sideColor = (side: Side) => (side === "long" ? COLORS.up : COLORS.down);
+  const pins: Pin[] = game.fighters.flatMap((f) => (f.id !== YOU && f.trap && !f.out ? [{ p: f.trap.price, glyph: f.trap.side === "long" ? "▲" : "▼", color: sideColor(f.trap.side) }] : []));
+  const marks: Mark[] = game.fighters
+    .filter((f) => f.out)
+    .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "KO" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt }));
+  const yours: Yours = {
+    ...(trap && !me.call && { trap: { side: trap.side, price: trap.price, at: trap.at, power: trap.power, count: COUNTS[fear], ahead: lineAhead?.orders } }),
+    ...(me.call && { call: { side: me.call.side, entry: me.call.entry, at: me.call.at, power: me.call.power, count: COUNTS[fear], maker: !!me.call.maker, koAt: me.call.koAt, move: moveOf(me.call, game.price) }, even }),
+    ...(flag !== undefined && { flag: { price: flag, banks: me.call ? valueOf(me.call, flag, STRIKE.maker) - me.call.stake : undefined, ahead: flagAhead?.orders } }),
+  };
+  const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => ({ at: roundEnds(game, r), round: r + 2, floor: kind.floors[r + 1] }));
+  const away = koDistance(me.call ?? opening("long", charge, game.price, Math.max(me.cash, 1), nowMs));
+
+  return (
+    <main className="arena">
+      <section className="field">
+        <div className="corner">
+          <button className="back" onClick={onLeave} title="Back to the start: the game carries on" aria-label="Back to the start">
+            &larr;
+          </button>
+        </div>
+        <div className="corner right">
+          <span className="chip" title={waiting ? "Everyone starts together when the lobby closes" : "Each round raises the least power you can haunt with"}>
+            {waiting ? (
+              <>
+                lobby <span className="dim">{rounds} rounds</span>
+              </>
+            ) : (
+              <>
+                round {round + 1}/{rounds}
+              </>
+            )}
+            {game.live && <span className="tag">live</span>}
+          </span>
+        </div>
+        <Field
+            key={game.id}
+            candles={candles}
+            intervalMs={kind.candleMs}
+            mark={mark?.p ?? null}
+            tickSize={tickSize}
+            reach={kind.reach}
+            span={{ from: game.startsAt, to: game.endsAt }}
+            rounds={steps}
+            yours={yours}
+            role={me.role}
+            walls={walls}
+          coin={base}
+            blasts={blasts}
+            marks={marks}
+            pins={pins}
+            pick={pick}
+            onPick={onPick}
+          />
+        {waiting && count <= 10 && (
+          <div key={count} className="count" aria-hidden="true">
+            <b>{count}</b>
+          </div>
+        )}
+        {!waiting && !game.over && nowMs - game.startsAt < 1200 && (
+          <div className="count boo" aria-hidden="true">
+            <b>boo!</b>
+            <small>the haunting begins</small>
+          </div>
+        )}
+        {moment &&
+          (scenes && moment.scene ? (
+            <Cutscene key={moment.n} scene={moment.scene} onDone={next} />
+          ) : (
+            <div key={moment.n} className={`banner ${moment.tone === "plain" ? "calm" : moment.tone}`} role="status">
+              <b>{moment.title}</b>
+              {moment.detail && <span>{moment.detail}</span>}
+            </div>
+          ))}
+        {game.over && !moment && <Debrief game={game} onAgain={onAgain} onLeave={onLeave} />}
+      </section>
+
+      <Board game={game} round={round} waiting={waiting} />
+
+      <section className="deck" aria-label="Your controls">
+        <div className="me">
+          <Spirit role={me.role} mood={me.out ? "ko" : me.call ? "attack" : made > 0 ? "happy" : "ready"} className="portrait" spin />
+          <div className="stack">
+            <span className="label">funds</span>
+            <b>{fmt.money(value)}</b>
+            <span className={made > 0 ? "good" : made < 0 ? "bad" : "dim"}>
+              {fmt.money(made, true)} <span className="dim">{fmt.gain(made / stake)}</span>
+            </span>
+          </div>
+        </div>
+
+        <div className={`power ${me.call || !can ? "locked" : ""}`}>
+          <span className="label">power</span>
+          <div className="fears" role="radiogroup" aria-label="Power" style={{ "--at": fear } as CSSProperties}>
+            <span className="thumb" aria-hidden="true" />
+            {FEARS.map((name, i) => (
+              <button key={name} role="radio" aria-checked={fear === i} className={fear === i ? "on" : ""} disabled={!!me.call || !can} onClick={() => setFear(i)} title={FEAR_TIPS[i]}>
+                <b>{name}</b>
+                <small>{tiers[i]}x</small>
+              </button>
+            ))}
+          </div>
+          <span className="readout dim">
+            {me.call ? `${me.call.power}x, ` : ""}K.O. {(away * 100).toFixed(1)}% away{!me.call && !waiting && fear === 0 && round > 0 ? `, the least round ${round + 1} allows` : ""}
+          </span>
+        </div>
+
+        <div className="orders">
+          {me.out ? (
+            <div className="out">
+              <b>{me.out.by === "ko" ? "you were knocked out" : "you were zapped"}</b>
+              <span className="dim">{game.over ? "" : "watch the rest, or"}</span>
+              <button className="plain" onClick={onAgain}>
+                haunt again
+              </button>
+            </div>
+          ) : war.busy ? (
+            <div className="sending">{war.busy}</div>
+          ) : me.call ? (
+            <>
+              <div className="in">
+                <span className={me.call.side === "long" ? "good" : "bad"}>
+                  {me.call.side === "long" ? "▲" : "▼"} {me.call.side} {me.call.power}x
+                </span>
+                <span className="flag">click {me.call.side === "long" ? "above" : "below"} them for a thundercloud</span>
+              </div>
+              <button
+                className="order bank"
+                onClick={bank}
+                disabled={!can}
+                title={`What the price has done for your call. Bank to close at the price now, and Strike takes ${fmt.money(bankFee)} for closing at the market; a thundercloud pays you instead (space)`}
+              >
+                <span>bank it</span>
+                <small>{fmt.money(moveOf(me.call, game.price), true)}</small>
+              </button>
+            </>
+          ) : game.over ? null : (
+            <div className="in hints">
+              {trap?.side === "short" ? <span className="flag">click below them for a thundercloud</span> : <span className="good">&#9650; click below them to {trap ? "move your graves" : "go long"}</span>}
+              {trap?.side === "long" ? <span className="flag">click above them for a thundercloud</span> : <span className="bad">&#9660; click above them to {trap ? "move your graves" : "go short"}</span>}
+            </div>
+          )}
+        </div>
+        {war.error && <p className="warning bad">{war.error}</p>}
+      </section>
+    </main>
+  );
+}
+
+function Debrief({ game, onAgain, onLeave }: { game: Game; onAgain: () => void; onLeave: () => void }) {
+  const me = game.fighters.find((f) => f.id === YOU)!;
+  const value = worth(me, game.price);
+  const made = value - me.stake;
+  const place = placeOf(game, YOU);
+  const badges = [
+    place === 1 && { icon: "★", name: "champion" },
+    !me.out && { icon: "⛨", name: "survivor" },
+    me.crits > 0 && { icon: "⚡", name: me.crits > 1 ? `critical hit x${me.crits}` : "critical hit" },
+  ].filter((m): m is { icon: string; name: string } => !!m);
+  return (
+    <div className="debrief" role="dialog" aria-label="The result">
+      <Spirit role={me.role} mood={place === 1 ? "happy" : me.out ? "ko" : made >= 0 ? "happy" : "hurt"} className="portrait" />
+      <div>
+        <h2>{me.out ? (me.out.by === "ko" ? "knocked out" : "zapped") : place === 1 ? "champion!" : `${fmt.ordinal(place)} place`}</h2>
+        <p>
+          {fmt.money(me.stake)} &rarr; <b>{fmt.money(value)}</b>{" "}
+          <span className={made > 0 ? "good" : made < 0 ? "bad" : "dim"}>
+            ({fmt.money(made, true)}, {fmt.gain(made / me.stake)})
+          </span>
+        </p>
+        <p className="dim">
+          {fmt.ordinal(place)} of {game.fighters.length}, {standingCount(game)} left standing
+        </p>
+        {!!me.liquidity && (
+          <p className="dim">
+            You added <b>{fmt.money(me.liquidity)}</b> to Strike&apos;s order book and earned {fmt.fine(me.liquidity * -STRIKE.maker)} in maker rebates
+          </p>
+        )}
+        {badges.length > 0 && (
+          <ul className="badges">
+            {badges.map((m) => (
+              <li key={m.name}>
+                <i>{m.icon}</i>
+                {m.name}
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="row">
+          <button className="big" onClick={onAgain} autoFocus>
+            haunt again
+          </button>
+          <button className="plain" onClick={onLeave}>
+            the start
+          </button>
+          <button className="plain" onClick={() => share(game, place, made / me.stake)}>
+            share
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function share(game: Game, place: number, change: number) {
+  const role = ROLES[game.fighters.find((f) => f.id === YOU)!.role];
+  const result = place === 1 ? "won" : `came ${fmt.ordinal(place)} of ${game.fighters.length} in`;
+  const text = `I ${result} a Boltergeist ${KINDS[game.kind].name.toLowerCase()} on ${game.symbol.replace(/-USD$/, "")} as ${role.hero}: ${fmt.gain(change)} on Strike's live prices. @strikeperps`;
+  window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(location.origin)}`, "_blank", "noopener");
+}
+
+const BOOK_SIDE: Record<Side, L3Side> = { long: "buy", short: "sell" };
+const FEARS = ["whisper", "howl", "shriek"];
+// How many graves each digs, and so how many ghosts rise when they spring.
+const COUNTS = [4, 8, 12];
+const FEAR_TIPS = ["The least power this round allows: hardest to knock out", "Halfway between", "The most power the market allows: the biggest swings"];
+
+function useCandles(game: Game, ticks: Tick[], mark: { p: number; at: number } | null): Candle[] {
+  const kind = KINDS[game.kind];
+  const built = useMemo(() => (game.kind === "skirmish" ? candlesFrom(ticks, kind.candleMs) : []), [game.kind, ticks, kind.candleMs]);
+  const [fetched, setFetched] = useState<Candle[]>([]);
+  const [seen, setSeen] = useState(mark);
+  if (mark && mark !== seen) {
+    setSeen(mark);
+    setFetched((c) => withPrice(c, mark.p, mark.at, kind.candleMs));
+  }
+  useEffect(() => {
+    if (game.kind === "skirmish") return;
+    let stale = false;
+    klines(game.symbol, kind.candles === "15m" ? "15m" : "1m").then(
+      (c) => !stale && setFetched(c),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [game.kind, game.symbol, kind.candles]);
+  return game.kind === "skirmish" ? built : fetched;
+}
+
+function withPrice(candles: Candle[], p: number, at: number, ms: number): Candle[] {
+  const last = candles.at(-1);
+  if (!last) return candles;
+  const t = Math.floor(at / ms) * ms;
+  if (t > last.t) return [...candles.slice(-999), { t, o: last.c, h: Math.max(last.c, p), l: Math.min(last.c, p), c: p }];
+  if (t < last.t) return candles;
+  return [...candles.slice(0, -1), { ...last, h: Math.max(last.h, p), l: Math.min(last.l, p), c: p }];
+}

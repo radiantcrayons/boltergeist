@@ -1,0 +1,24 @@
+{
+  "name": "trade-wars-infra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AWS for Trade Wars: the arena tables, the Vercel OIDC roles, a cost budget and alarms.",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "tsc --noEmit && cdk deploy"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "2.273.0",
+    "constructs": "10.8.1",
+    "dotenv": "16.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "aws-cdk": "2.1145.0",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

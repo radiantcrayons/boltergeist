@@ -1,0 +1,74 @@
+{
+  "notes": {
+    "Rate limit the arena": "A player in a fight reads it every second and a half (40 a minute) and the base reads the lobby every 4 seconds, so 600 a minute leaves room for a dozen players behind one address. The arena's reads are cached for a second at the edge, so a flood that gets through mostly hits the cache, not the table.",
+    "Rate limit the order book": "A player's browser fetches a snapshot of Strike's order book when it connects to a fight's market, and again only if its live stream breaks, so 60 a minute per address is plenty and keeps a flood off Strike."
+  },
+  "managed": {
+    "Bot Protection": "off",
+    "BotID": "basic"
+  },
+  "rules": [
+    {
+      "action": {
+        "mitigate": {
+          "action": "rate_limit",
+          "actionDuration": "1m",
+          "rateLimit": {
+            "action": "rate_limit",
+            "algo": "fixed_window",
+            "keys": [
+              "ip"
+            ],
+            "limit": 600,
+            "window": 60
+          }
+        }
+      },
+      "active": true,
+      "conditionGroup": [
+        {
+          "conditions": [
+            {
+              "op": "re",
+              "type": "path",
+              "value": "^/api/arenas(/|$)"
+            }
+          ]
+        }
+      ],
+      "description": "Per address: the arena's routes, so a flood is turned away before it reaches a function or DynamoDB.",
+      "name": "Rate limit the arena"
+    },
+    {
+      "action": {
+        "mitigate": {
+          "action": "rate_limit",
+          "actionDuration": "1m",
+          "rateLimit": {
+            "action": "rate_limit",
+            "algo": "fixed_window",
+            "keys": [
+              "ip"
+            ],
+            "limit": 60,
+            "window": 60
+          }
+        }
+      },
+      "active": true,
+      "conditionGroup": [
+        {
+          "conditions": [
+            {
+              "op": "re",
+              "type": "path",
+              "value": "^/api/l3(/|$)"
+            }
+          ]
+        }
+      ],
+      "description": "Per address: the order book snapshot route, so a flood is turned away before it reaches a function or Strike.",
+      "name": "Rate limit the order book"
+    }
+  ]
+}
