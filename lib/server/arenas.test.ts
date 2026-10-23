@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { after, before, test } from "node:test";
 import { CreateTableCommand, DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { KINDS, SEATS, type Arena } from "../game/war.ts";
+import { netFrom } from "../strike.ts";
 import { CAP } from "./moves.ts";
 
 // DynamoDB Local in Docker, on a port of its own, with a fresh table each run. Nothing here reaches AWS.
@@ -14,6 +15,7 @@ process.env.DYNAMODB_ENDPOINT = `http://127.0.0.1:${PORT}`;
 process.env.ARENAS_TABLE = "boltergeist-test";
 
 let MARK = 100_000;
+const TEST_MARK = 81_500;
 let LOW: number | undefined;
 let markAsks = 0;
 const ACCOUNTS: Record<string, string> = {};
@@ -23,7 +25,7 @@ globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
   if (u.includes("exchangeInfo")) return Response.json({ symbols: SYMBOLS.map((symbol) => ({ symbol, status: "trading" })) });
   if (u.includes("markPrice")) {
     markAsks++;
-    return Response.json({ p: String(MARK) });
+    return Response.json({ p: String(u.includes("testnet") ? TEST_MARK : MARK) });
   }
   if (u.includes("klines")) return Response.json(LOW === undefined ? [] : [[clock - 500, String(MARK), String(MARK), String(LOW), String(MARK)]]);
   if (u.endsWith("/v2/account")) {
@@ -272,4 +274,22 @@ test("a crowd of moves at once asks Strike for its price once", async () => {
   const before = markAsks;
   await Promise.all(players.map((s) => store.act(a, { secret: s, what: "call", side: "long", power: 5 })));
   assert.equal(markAsks - before, 1);
+});
+
+test("each Strike network keeps its own players and prices under the same game, and nothing else is taken for one", async () => {
+  assert.equal(netFrom(null), "mainnet");
+  assert.equal(netFrom("testnet"), "testnet");
+  assert.equal(netFrom("devnet"), null);
+  const a = await battle();
+  const t = await store.arena(a.id, "testnet");
+  assert.equal(t.net, "testnet");
+  const tester = secret();
+  await store.join(a, { secret: secret(), name: "Main Otter", role: "soldier" });
+  await store.join(t, { secret: tester, name: "Test Otter", role: "soldier" });
+  assert.deepEqual((await store.log(a, { fresh: true })).players.map((p) => p.name), ["Main Otter"]);
+  assert.deepEqual((await store.log(t, { fresh: true })).players.map((p) => p.name), ["Test Otter"]);
+  assert.deepEqual((await store.lobby([a.id], "testnet"))[a.id].map((p) => p.name), ["Test Otter"]);
+  clock += 2000;
+  const move = await store.act(t, { secret: tester, what: "call", side: "long", power: 10 });
+  assert.equal(move.entry, TEST_MARK);
 });

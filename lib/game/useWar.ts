@@ -4,7 +4,7 @@ import { strike } from "../live/exchange";
 import { BUILDER, type Session } from "../live/session";
 import { Full, gather, join, look, tell } from "../online";
 import { PREFIX } from "../store";
-import { klines, type Mark } from "../strike";
+import { klines, NETWORK, type Mark } from "../strike";
 import type { Market } from "../types";
 import {
   advance,
@@ -37,7 +37,8 @@ import {
   type Side,
 } from "./war";
 
-const KEY = `${PREFIX}games`;
+// Each Strike network keeps its own games.
+const KEY = `${PREFIX}games${NETWORK === "mainnet" ? "" : `.${NETWORK}`}`;
 const RECORD = 30;
 
 function load(): Game[] {

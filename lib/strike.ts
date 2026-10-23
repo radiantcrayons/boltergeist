@@ -1,12 +1,21 @@
+import { recall } from "./store.ts";
 import type { Candle, Market } from "./types";
 
 export type Network = "mainnet" | "testnet";
 
-export const NETWORK: Network = process.env.NEXT_PUBLIC_STRIKE_NETWORK === "testnet" ? "testnet" : "mainnet";
-const HOST = NETWORK === "testnet" ? "api-v2-testnet.strikefinance.org" : "api.strikefinance.org";
-export const REST = `https://${HOST}`;
-const WS = `wss://${HOST}/ws/price`;
-export const STRIKE_APP = process.env.NEXT_PUBLIC_STRIKE_APP_URL || "https://app.strikefinance.org";
+export const isNetwork = (v: unknown): v is Network => v === "mainnet" || v === "testnet";
+// The network a request to our API is for: as asked, or this build's own when it doesn't say; null for anything else.
+export const netFrom = (asked: string | null): Network | null => (asked === null ? BUILT : isNetwork(asked) ? asked : null);
+// The network this build starts on; a browser can switch to the other (it reloads to), and the server takes it per request.
+export const BUILT: Network = process.env.NEXT_PUBLIC_STRIKE_NETWORK === "testnet" ? "testnet" : "mainnet";
+const chosen = typeof window === "undefined" ? null : recall<unknown>("net", null);
+export const NETWORK: Network = isNetwork(chosen) ? chosen : BUILT;
+const hostOf = (n: Network) => (n === "testnet" ? "api-v2-testnet.strikefinance.org" : "api.strikefinance.org");
+export const restOf = (n: Network) => `https://${hostOf(n)}`;
+export const REST = restOf(NETWORK);
+const WS = `wss://${hostOf(NETWORK)}/ws/price`;
+export const STRIKE_APP =
+  (NETWORK === BUILT && process.env.NEXT_PUBLIC_STRIKE_APP_URL) || (NETWORK === "testnet" ? "https://testnet.strikefinance.org" : "https://app.strikefinance.org");
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${REST}${path}`, { cache: "no-store" });

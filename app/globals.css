@@ -1897,7 +1897,12 @@ h2 {
   color: var(--ink);
 }
 
-.modes button.live.on {
+.modes button.testnet.on {
+  background: var(--mint);
+  color: var(--ink);
+}
+
+.modes button.mainnet.on {
   background: var(--rose);
   color: #fff;
 }

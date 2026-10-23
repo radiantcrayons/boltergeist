@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { REST } from "../strike.ts";
+import { NETWORK, REST } from "../strike.ts";
 import { apply, fromSnapshot, record, type Book, type L3Snapshot, type L3Update, type Tape } from "./l3.ts";
 
 const WS = `${REST.replace(/^http/, "ws")}/ws/l3`;
@@ -39,7 +39,7 @@ export function watchBook(symbol: string, onChange: (book: Book, tape: Tape) => 
   };
 
   const load = async (socket: WebSocket) => {
-    const res = await fetch(`/api/l3?symbol=${encodeURIComponent(name)}`, { cache: "no-store" }).catch(() => null);
+    const res = await fetch(`/api/l3?symbol=${encodeURIComponent(name)}&net=${NETWORK}`, { cache: "no-store" }).catch(() => null);
     const snap = res?.ok ? ((await res.json().catch(() => null)) as L3Snapshot | null) : null;
     if (ws !== socket) return;
     if (!snap?.bids || !snap.asks) return restart(socket);

@@ -1,6 +1,7 @@
 import type { Log, Move, Player, Role } from "./game/war";
 import { signedHeaders, type Keys } from "./live/keys";
 import { PREFIX } from "./store";
+import { NETWORK } from "./strike";
 
 export type Me = { id: string; secret: string; name: string };
 
@@ -85,7 +86,7 @@ async function proofOf(keys: Keys) {
 export async function join(arena: string, role: Role, live: boolean, keys?: Keys): Promise<{ me: string; arena: string; joinedAt: number; log: Log } | null> {
   const { secret, name } = await me();
   const proof = keys ? await proofOf(keys).catch(() => undefined) : undefined;
-  const got = await send<{ player: Player; arena?: string; log: Log }>(`/api/arenas/${arena}`, { method: "POST", body: JSON.stringify({ secret, name, role, live, what: "join", ...(proof && { proof }) }) }).catch((err) => {
+  const got = await send<{ player: Player; arena?: string; log: Log }>(`/api/arenas/${arena}?net=${NETWORK}`, { method: "POST", body: JSON.stringify({ secret, name, role, live, what: "join", ...(proof && { proof }) }) }).catch((err) => {
     if (err instanceof Down) return null;
     throw err;
   });
@@ -97,7 +98,7 @@ export async function tell(arena: string, seat: string, move: Omit<Move, "at" | 
   const { secret } = await me();
   for (let tries = 0; tries < 3; tries++) {
     try {
-      await send(`/api/arenas/${arena}`, { method: "POST", body: JSON.stringify({ ...move, secret, seat }) });
+      await send(`/api/arenas/${arena}?net=${NETWORK}`, { method: "POST", body: JSON.stringify({ ...move, secret, seat }) });
       return;
     } catch (err) {
       if (tries === 2) throw err;
@@ -108,8 +109,8 @@ export async function tell(arena: string, seat: string, move: Omit<Move, "at" | 
 
 // What's happened in a game: all of it, or with `after` (a look's `next`) only what's new since, a few seconds over.
 export async function look(arena: string, after?: string): Promise<Log | null> {
-  const query = new URLSearchParams({ ...(after && { after }), ...(!timed && { t: String(Date.now()) }) }).toString();
-  const got = await send<Log>(`/api/arenas/${arena}${query ? `?${query}` : ""}`, undefined, !timed).catch(() => null);
+  const query = new URLSearchParams({ net: NETWORK, ...(after && { after }), ...(!timed && { t: String(Date.now()) }) }).toString();
+  const got = await send<Log>(`/api/arenas/${arena}?${query}`, undefined, !timed).catch(() => null);
   return got && local(got);
 }
 
@@ -122,6 +123,6 @@ export function gather(had: Log | undefined, got: Log): Log {
 }
 
 export async function lobbies(ids: string[]): Promise<Record<string, Player[]>> {
-  const got = await send<Record<string, Player[]>>(`/api/arenas?ids=${ids.join(",")}`).catch(() => null);
+  const got = await send<Record<string, Player[]>>(`/api/arenas?ids=${ids.join(",")}&net=${NETWORK}`).catch(() => null);
   return got ?? {};
 }

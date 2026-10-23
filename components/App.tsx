@@ -8,12 +8,22 @@ import { YOU, type Game, type Kind, type Role } from "@/lib/game/war";
 import { balance as fetchBalance, loadSession, saveSession, type Balance, type Session } from "@/lib/live/session";
 import { play, setHaunting, setSound } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
-import { markets as loadMarkets, NETWORK, stream, type Mark, type Ticker } from "@/lib/strike";
+import { markets as loadMarkets, NETWORK, stream, type Mark, type Network, type Ticker } from "@/lib/strike";
 import type { Market } from "@/lib/types";
 import { Arena } from "./Arena";
 import { Logo } from "./art/Effects";
 import { Base } from "./Base";
 import { Connect } from "./Connect";
+
+type Mode = "paper" | Network;
+const MODES: Mode[] = ["paper", "testnet", "mainnet"];
+const MODE_TIPS: Record<Mode, string> = {
+  paper: "Play with pretend money on Strike's live prices",
+  testnet: "Play live on Strike's testnet, with test money",
+  mainnet: "Play live on Strike, with real money",
+};
+// Price history is kept apart for each network: the same market can stand at another price on testnet.
+const kept = (symbol: string) => (NETWORK === "mainnet" ? symbol : `${NETWORK}.${symbol}`);
 
 // Whether you have graves resting or a position open on Strike in a game that's still running.
 const outOnStrike = (g: Game | null) => {
@@ -51,7 +61,7 @@ export default function App() {
       setMarks((all) => Object.assign({ ...all }, ...batches));
       setTicks((all) => {
         const next = { ...all };
-        for (const m of batches) for (const [s, mark] of Object.entries(m)) next[s] = withTick(next[s] ?? loadTicks(s), mark);
+        for (const m of batches) for (const [s, mark] of Object.entries(m)) next[s] = withTick(next[s] ?? loadTicks(kept(s)), mark);
         return next;
       });
     };
@@ -91,7 +101,7 @@ export default function App() {
   useEffect(() => {
     if (Date.now() - savedAt.current < 10_000) return;
     savedAt.current = Date.now();
-    for (const s of new Set([symbol, ...games.filter((g) => !g.over).map((g) => g.symbol)])) if (ticks[s]) saveTicks(s, ticks[s]);
+    for (const s of new Set([symbol, ...games.filter((g) => !g.over).map((g) => g.symbol)])) if (ticks[s]) saveTicks(kept(s), ticks[s]);
   }, [ticks, games, symbol]);
   useEffect(() => remember("open", open), [open]);
   useEffect(() => remember("symbol", symbol), [symbol]);
@@ -136,6 +146,19 @@ export default function App() {
   const shown = game?.symbol ?? symbol;
   const market = markets?.find((m) => m.symbol === shown);
   const goingLive = live && !!session;
+  // Paper plays on mainnet's prices; testnet and mainnet are live there. Another network means starting the page again on it.
+  const mode: Mode = live ? NETWORK : "paper";
+  const choose = (next: Mode) => {
+    const net: Network = next === "paper" ? "mainnet" : next;
+    if (net !== NETWORK) {
+      remember("net", net);
+      remember("live", next !== "paper");
+      location.reload();
+      return;
+    }
+    setLive(next !== "paper");
+    if (next !== "paper" && !session) setConnecting(true);
+  };
   const enter = (kind: Kind, role: Role, real = goingLive) =>
     void war.enter(kind, role, real).then((id) => {
       if (id) setOpen(id);
@@ -158,21 +181,12 @@ export default function App() {
           <span className="dim">{market?.base ?? shown}</span>
           {marks[shown] && market ? fmt.price(marks[shown].p, market.tickSize) : "..."}
         </div>
-        <div className="modes" role="radiogroup" aria-label="Paper or live">
-          <button role="radio" aria-checked={!live} className={!live ? "on" : ""} onClick={() => setLive(false)}>
-            paper
-          </button>
-          <button
-            role="radio"
-            aria-checked={live}
-            className={`live ${live ? "on" : ""}`}
-            onClick={() => {
-              setLive(true);
-              if (!session) setConnecting(true);
-            }}
-          >
-            live{NETWORK === "testnet" ? " testnet" : ""}
-          </button>
+        <div className="modes" role="radiogroup" aria-label="Paper, testnet or mainnet">
+          {MODES.map((m) => (
+            <button key={m} role="radio" aria-checked={mode === m} className={`${m} ${mode === m ? "on" : ""}`} onClick={() => choose(m)} title={MODE_TIPS[m]}>
+              {m}
+            </button>
+          ))}
         </div>
         <button className={`account ${session ? "on" : ""}`} onClick={() => setConnecting(true)}>
           {session ? (balance ? fmt.money(balance.available) : "connected") : "connect"}
