@@ -22,7 +22,7 @@ export class Alarms extends Construct {
   constructor(scope: Construct, id: string, props: AlarmsProps) {
     super(scope, id);
 
-    this.topic = new sns.Topic(this, "Topic", { topicName: "trade-wars-alerts", displayName: "Trade Wars alerts" });
+    this.topic = new sns.Topic(this, "Topic", { topicName: "boltergeist-alerts", displayName: "Boltergeist alerts" });
     for (const email of props.alertEmails) this.topic.addSubscription(new subs.EmailSubscription(email));
 
     const throttleEvents = (metricName: string) =>
@@ -34,9 +34,9 @@ export class Alarms extends Construct {
         period: Duration.minutes(5),
       });
     const throttled = new cw.Alarm(this, "ArenasThrottled", {
-      alarmName: "trade-wars-arenas-throttled",
+      alarmName: "boltergeist-arenas-throttled",
       alarmDescription:
-        "trade-wars-arenas turned requests away at its ceiling (infra/lib/tables.ts). If it's real play, raise the ceiling and " +
+        "boltergeist-arenas turned requests away at its ceiling (infra/lib/tables.ts). If it's real play, raise the ceiling and " +
         "deploy; if it's a flood, the firewall's rate limit (deploy/vercel-firewall.json).",
       metric: new cw.MathExpression({
         expression: "reads + writes",

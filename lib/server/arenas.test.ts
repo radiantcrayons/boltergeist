@@ -8,9 +8,9 @@ import { KINDS, SEATS, type Arena } from "../game/war.ts";
 // DynamoDB Local in Docker, on a port of its own, with a fresh table each run. Nothing here reaches AWS.
 const PORT = 8124;
 const IMAGE = "amazon/dynamodb-local:3.3.2@sha256:6ada631ec7aa5fc83446855eb17233e3dad184fec47477e8140c6c569cfe0c86";
-const CONTAINER = "trade-wars-dynamodb-local";
+const CONTAINER = "boltergeist-dynamodb-local";
 process.env.DYNAMODB_ENDPOINT = `http://127.0.0.1:${PORT}`;
-process.env.ARENAS_TABLE = "trade-wars-test";
+process.env.ARENAS_TABLE = "boltergeist-test";
 
 const MARK = 100_000;
 const SYMBOLS = ["BTC-USD", "ETH-USD", "SOL-USD", "XRP-USD"];

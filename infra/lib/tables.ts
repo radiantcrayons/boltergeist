@@ -5,10 +5,10 @@ import { Construct } from "constructs";
 /**
  * The arenas: each fight's players and moves under one partition key, gone a day after the fight
  * ends (expiresAt). Paid per request, with a ceiling on each table: past it requests are throttled
- * rather than charged, and trade-wars-arenas-throttled emails.
+ * rather than charged, and boltergeist-arenas-throttled emails.
  *
- *   trade-wars-arenas      production
- *   trade-wars-arenas-dev  local dev and Vercel previews
+ *   boltergeist-arenas      production
+ *   boltergeist-arenas-dev  local dev and Vercel previews
  *
  * Nothing in them outlives its fight, so there's no point-in-time recovery or export.
  */
@@ -27,7 +27,7 @@ export class Tables extends Construct {
 
     this.arenas = new dynamodb.TableV2(this, "Arenas", {
       ...keys,
-      tableName: "trade-wars-arenas",
+      tableName: "boltergeist-arenas",
       billing: dynamodb.Billing.onDemand({ maxReadRequestUnits: 100, maxWriteRequestUnits: 25 }),
       deletionProtection: true,
       removalPolicy: RemovalPolicy.RETAIN,
@@ -35,7 +35,7 @@ export class Tables extends Construct {
 
     this.arenasDev = new dynamodb.TableV2(this, "ArenasDev", {
       ...keys,
-      tableName: "trade-wars-arenas-dev",
+      tableName: "boltergeist-arenas-dev",
       billing: dynamodb.Billing.onDemand({ maxReadRequestUnits: 50, maxWriteRequestUnits: 25 }),
       removalPolicy: RemovalPolicy.DESTROY,
     });

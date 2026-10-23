@@ -1,8 +1,8 @@
 {
-  "name": "trade-wars-infra",
+  "name": "boltergeist-infra",
   "version": "0.1.0",
   "private": true,
-  "description": "AWS for Trade Wars: the arena tables, the Vercel OIDC roles, a cost budget and alarms.",
+  "description": "AWS for Boltergeist: the game tables, the Vercel OIDC roles, a cost budget and alarms.",
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",

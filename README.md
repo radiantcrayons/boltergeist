@@ -186,7 +186,7 @@ Then open http://localhost:3000. It starts on paper with Strike's mainnet prices
 | `NEXT_PUBLIC_BUILDER_CODE` | Your Strike builder code, for wallet sign-in |
 | `NEXT_PUBLIC_BUILDER_FEE_BPS` | An optional builder fee on live charges and banks, 0 to 100 basis points. Unset, there is none |
 | `NEXT_PUBLIC_STRIKE_APP_URL` | Where players go to deposit |
-| `ARENAS_TABLE` | The arena's DynamoDB table. `trade-wars-arenas-dev` for local dev and previews, `trade-wars-arenas` in production |
+| `ARENAS_TABLE` | The arena's DynamoDB table. `boltergeist-arenas-dev` for local dev and previews, `boltergeist-arenas` in production |
 | `AWS_ROLE_ARN` | On Vercel: the role for the deployment's environment (the stack's outputs). Locally, leave it unset and use `AWS_PROFILE` |
 | `DYNAMODB_ENDPOINT` | DynamoDB Local instead of AWS |
 
@@ -195,16 +195,16 @@ arena against DynamoDB Local in Docker, `npm run check` typechecks, `npm run lin
 
 ## Hosting
 
-The app runs on Vercel. The arena's tables are in AWS, in one CDK stack, `TradeWarsStack` (`infra/`):
+The app runs on Vercel. The arena's tables are in AWS, in one CDK stack, `BoltergeistStack` (`infra/`):
 
 | Resource | Name | Notes |
 | --- | --- | --- |
-| DynamoDB | `trade-wars-arenas` | Production. Paid per request, at most 100 reads and 25 writes a second: past that requests are throttled, not charged. Each haunt's items go a day after it ends |
-| DynamoDB | `trade-wars-arenas-dev` | Local dev and Vercel previews |
-| IAM role | `trade-wars-vercel-production` | Assumed by production's functions with Vercel's OIDC token: no AWS keys are stored on Vercel |
-| IAM role | `trade-wars-vercel-preview` | The same for previews and `vercel dev`, on the dev table |
-| Budget | `trade-wars-monthly` | Emails at 50, 80 and 100% of the month's budget, counting only resources tagged `project=trade-wars` |
-| Alarm | `trade-wars-arenas-throttled` | Emails when the production table turns requests away at its ceiling |
+| DynamoDB | `boltergeist-arenas` | Production. Paid per request, at most 100 reads and 25 writes a second: past that requests are throttled, not charged. Each haunt's items go a day after it ends |
+| DynamoDB | `boltergeist-arenas-dev` | Local dev and Vercel previews |
+| IAM role | `boltergeist-vercel-production` | Assumed by production's functions with Vercel's OIDC token: no AWS keys are stored on Vercel |
+| IAM role | `boltergeist-vercel-preview` | The same for previews and `vercel dev`, on the dev table |
+| Budget | `boltergeist-monthly` | Emails at 50, 80 and 100% of the month's budget, counting only resources tagged `project=boltergeist` |
+| Alarm | `boltergeist-arenas-throttled` | Emails when the production table turns requests away at its ceiling |
 
 ```bash
 cd infra

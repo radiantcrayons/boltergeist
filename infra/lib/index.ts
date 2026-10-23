@@ -5,11 +5,11 @@ import { Guardrails } from "./guardrails.ts";
 import { Tables } from "./tables.ts";
 import { Vercel } from "./vercel.ts";
 
-/** Everything Trade Wars needs on AWS. */
-export class TradeWarsStack extends Stack {
+/** Everything Boltergeist needs on AWS. */
+export class BoltergeistStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
-    Tags.of(this).add("project", "trade-wars");
+    Tags.of(this).add("project", "boltergeist");
 
     const alertEmails = (process.env.ALERT_EMAIL ?? "")
       .split(",")
@@ -20,7 +20,7 @@ export class TradeWarsStack extends Stack {
     if (!team) throw new Error("Set VERCEL_TEAM in infra/.env (see .env.example)");
 
     const tables = new Tables(this, "Tables");
-    const project = process.env.VERCEL_PROJECT || "trade-wars";
+    const project = process.env.VERCEL_PROJECT || "boltergeist";
     const vercel = new Vercel(this, "Vercel", {
       team,
       project,

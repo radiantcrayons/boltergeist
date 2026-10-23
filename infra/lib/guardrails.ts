@@ -7,7 +7,7 @@ interface GuardrailsProps {
 }
 
 /**
- * A cost budget for Trade Wars alone: it counts only resources tagged project=trade-wars, so the rest
+ * A cost budget for Boltergeist alone: it counts only resources tagged project=boltergeist, so the rest
  * of the account doesn't set it off. Emails at 50/80/100% of actual and 100% of forecast spend. It
  * alerts rather than stopping anything. The `project` tag has to be an active cost allocation tag for
  * the filter to match (see README).
@@ -24,11 +24,11 @@ export class Guardrails extends Construct {
 
     new budgets.CfnBudget(this, "MonthlyBudget", {
       budget: {
-        budgetName: "trade-wars-monthly",
+        budgetName: "boltergeist-monthly",
         budgetType: "COST",
         timeUnit: "MONTHLY",
         budgetLimit: { amount: props.monthlyBudgetUsd, unit: "USD" },
-        costFilters: { TagKeyValue: ["user:project$trade-wars"] },
+        costFilters: { TagKeyValue: ["user:project$boltergeist"] },
       },
       notificationsWithSubscribers: [at(50, "ACTUAL"), at(80, "ACTUAL"), at(100, "ACTUAL"), at(100, "FORECASTED")],
     });

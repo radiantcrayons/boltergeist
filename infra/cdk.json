@@ -1,5 +1,5 @@
 {
-  "app": "npx tsx bin/trade-wars.ts",
+  "app": "npx tsx bin/boltergeist.ts",
   "context": {
     "@aws-cdk/core:checkSecretUsage": true,
     "@aws-cdk/core:target-partitions": ["aws"]
