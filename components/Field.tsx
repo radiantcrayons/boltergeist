@@ -1034,6 +1034,7 @@ export function Field(props: Props) {
   // Where each rival is shown, gliding after where they really are when they move.
   const glides = useRef(new Map<string, number>());
   const appears = useRef(new Map<string, number>());
+  const places = useRef(new Map<string, { x: number; dy: number }>());
   const writing = useRef<HTMLCanvasElement | null>(null);
   const asked = useRef("");
   const trodden = useRef({ key: "", seen: new Map<string, boolean>() });
@@ -1894,6 +1895,7 @@ export function Field(props: Props) {
     const crowd = new Map<number, number>();
     if (glides.current.size > 64) glides.current.clear();
     if (appears.current.size > 64) appears.current.clear();
+    if (places.current.size > 64) places.current.clear();
     // How far a rival's graves or ghost have come into view since they first showed.
     const appear = (key: string) => {
       const v = Math.min(1, (appears.current.get(key) ?? 0) + fadeStep * 0.6);
@@ -1902,7 +1904,7 @@ export function Field(props: Props) {
     };
     for (const r of pins) {
       const was = glides.current.get(r.id) ?? r.p;
-      const at0 = was + (r.p - was) * fadeStep;
+      const at0 = was + (r.p - was) * fadeStep * 0.6;
       glides.current.set(r.id, at0);
       const y = yOf(at0);
       if (!onMap(y)) continue;
@@ -1911,8 +1913,15 @@ export function Field(props: Props) {
       crowd.set(lane, n + 1);
       const rk = GHOST_KIND[r.role];
       const s = FIELD_SIZE[rk] * 0.7;
-      const x = -KIDS_BACK + 5.5 + n * 1.05;
-      const ry = y + (n ? (n % 2 ? 0.28 : -0.28) : 0);
+      // Their place in the column glides too, when others come and go on their row.
+      const tx = -KIDS_BACK + 5.5 + n * 1.05;
+      const tdy = n ? (n % 2 ? 0.28 : -0.28) : 0;
+      const spot = places.current.get(r.id) ?? { x: tx, dy: tdy };
+      spot.x += (tx - spot.x) * fadeStep * 0.6;
+      spot.dy += (tdy - spot.dy) * fadeStep * 0.6;
+      places.current.set(r.id, spot);
+      const x = spot.x;
+      const ry = y + spot.dy;
       if (!r.call) {
         graveRow(ry, 2, r.side, appear(`${r.id}|graves`), { shift: x + KIDS_BACK, gap: 0.55, tint: r.hue, size: 1.2 });
         continue;
