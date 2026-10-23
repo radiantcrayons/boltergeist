@@ -7,6 +7,8 @@ import { ARENAS_READ_WRITE } from "./tables.ts";
 interface VercelProps {
   team: string;
   project: string;
+  /** The Vercel projects whose functions may assume the roles: the project above unless others are named. */
+  apps: string[];
   /** True when the account already has the team's OIDC provider: there can only be one. */
   existingProvider: boolean;
   arenas: dynamodb.ITableV2;
@@ -37,7 +39,7 @@ export class Vercel extends Construct {
         assumedBy: new iam.WebIdentityPrincipal(providerArn, {
           StringEquals: {
             [`${issuer}:aud`]: audience,
-            [`${issuer}:sub`]: environments.map((env) => `owner:${props.team}:project:${props.project}:environment:${env}`),
+            [`${issuer}:sub`]: props.apps.flatMap((app) => environments.map((env) => `owner:${props.team}:project:${app}:environment:${env}`)),
           },
         }),
       });

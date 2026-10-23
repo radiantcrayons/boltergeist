@@ -248,8 +248,8 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
       )}
 
       {finished.length > 0 && (
-        <section className="record" aria-label="Your record">
-          <h2>your record</h2>
+        <section className="record" aria-label="History">
+          <h2>history</h2>
           <div className="totals">
             <span>
               <b>{finished.length}</b> haunted

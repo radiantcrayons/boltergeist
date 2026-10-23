@@ -20,9 +20,14 @@ export class TradeWarsStack extends Stack {
     if (!team) throw new Error("Set VERCEL_TEAM in infra/.env (see .env.example)");
 
     const tables = new Tables(this, "Tables");
+    const project = process.env.VERCEL_PROJECT || "trade-wars";
     const vercel = new Vercel(this, "Vercel", {
       team,
-      project: process.env.VERCEL_PROJECT || "trade-wars",
+      project,
+      apps: (process.env.VERCEL_APPS || project)
+        .split(",")
+        .map((a) => a.trim())
+        .filter(Boolean),
       existingProvider: process.env.VERCEL_OIDC_PROVIDER === "existing",
       arenas: tables.arenas,
       arenasDev: tables.arenasDev,

@@ -347,7 +347,6 @@ h2 {
   height: 230px;
   margin-bottom: 8px;
   background:
-    radial-gradient(circle, rgba(255, 255, 255, 0.06) 1.2px, transparent 1.6px) 0 0 / 12px 12px,
     radial-gradient(ellipse at 50% 100%, rgba(43, 245, 181, 0.35), transparent 65%),
     linear-gradient(180deg, #0b1f1a, #0d1116);
   border-bottom: 2px solid var(--edge);
@@ -355,7 +354,6 @@ h2 {
 
 .card.hero.warlord .stage {
   background:
-    radial-gradient(circle, rgba(255, 255, 255, 0.06) 1.2px, transparent 1.6px) 0 0 / 12px 12px,
     radial-gradient(ellipse at 50% 100%, rgba(255, 225, 74, 0.3), transparent 65%),
     linear-gradient(180deg, #1d1a0b, #0d1116);
 }
@@ -363,12 +361,12 @@ h2 {
 .card.hero .stage::after {
   content: "";
   position: absolute;
-  left: 18%;
-  right: 18%;
-  bottom: 10px;
-  height: 18px;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.45);
+  left: 20%;
+  right: 20%;
+  bottom: 14px;
+  height: 30px;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0) 70%);
+  filter: blur(3px);
 }
 
 .card.hero .art {
@@ -451,7 +449,7 @@ h2 {
 
 .game {
   display: grid;
-  grid-template-columns: 1.6fr 1fr 1fr 1fr auto;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 5.5rem;
   align-items: center;
   gap: 12px;
   width: 100%;
@@ -485,6 +483,10 @@ h2 {
   font: 22px var(--display), sans-serif;
 }
 
+.record li button > :last-child {
+  text-align: right;
+}
+
 .record ul {
   margin: 0;
   padding: 0;
@@ -493,7 +495,8 @@ h2 {
 
 .record li button {
   display: grid;
-  grid-template-columns: 1.6fr 1fr auto;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 11rem;
+  align-items: baseline;
   gap: 12px;
   width: 100%;
   padding: 9px 4px;
@@ -2157,6 +2160,10 @@ h2 {
 @media (max-width: 600px) {
   .arena {
     grid-template-rows: minmax(300px, 84vw) auto auto;
+  }
+
+  .record li button {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 7.5rem;
   }
 
   .corner {
