@@ -210,7 +210,10 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         : [],
     [liveBook, bookVersion],
   );
-  const blasts = (l3.tape?.fills ?? []).filter((f) => nowMs - f.at < 900).map((f) => ({ p: Number(f.price), at: f.at }));
+  // Fills from the tape, kept for a little longer than their puff of dust lasts, so the clock's tick alone doesn't rebuild them.
+  const fills = l3.tape?.fills;
+  const tick = Math.floor(nowMs / 900);
+  const blasts = useMemo(() => (fills ?? []).filter((f) => tick * 900 - f.at < 1800).map((f) => ({ p: Number(f.price), at: f.at })), [fills, tick]);
   const bank = () => can && me.call && war.bank(game.id);
   const sideOf = (p: number): Side => (p < game.price ? "long" : "short");
   // A click takes the side of the price it lands on, then the nearest tick on that side, so one by the kids is never the price itself.
@@ -263,16 +266,23 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
-  const hues = huesFor(game.fighters.filter((f) => f.id !== YOU).map((f) => f.id));
-  const pins: Pin[] = game.fighters.flatMap((f): Pin[] => {
-    if (f.id === YOU || f.out) return [];
-    const hue = hues.get(f.id) ?? COLORS.text;
-    if (f.call) return [{ id: f.id, p: f.call.entry, role: f.role, hue, call: true }];
-    return f.trap ? [{ id: f.id, p: f.trap.price, role: f.role, hue, call: false }] : [];
-  });
-  const marks: Mark[] = game.fighters
-    .filter((f) => f.out)
-    .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "KO" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt }));
+  const fighters = game.fighters;
+  const pins = useMemo(() => {
+    const hues = huesFor(fighters.filter((f) => f.id !== YOU).map((f) => f.id));
+    return fighters.flatMap((f): Pin[] => {
+      if (f.id === YOU || f.out) return [];
+      const hue = hues.get(f.id) ?? COLORS.text;
+      if (f.call) return [{ id: f.id, p: f.call.entry, role: f.role, hue, call: true }];
+      return f.trap ? [{ id: f.id, p: f.trap.price, role: f.role, hue, call: false }] : [];
+    });
+  }, [fighters]);
+  const marks = useMemo(
+    (): Mark[] =>
+      fighters
+        .filter((f) => f.out)
+        .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "KO" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt })),
+    [fighters],
+  );
   const yours: Yours = {
     ...(trap && !me.call && { trap: { side: trap.side, price: trap.price, at: trap.at, power: trap.power, count: COUNTS[fear], ahead: lineAhead?.orders } }),
     ...(me.call && { call: { side: me.call.side, entry: me.call.entry, at: me.call.at, power: me.call.power, count: COUNTS[fear], maker: !!me.call.maker, koAt: me.call.koAt, move: moveOf(me.call, game.price) } }),

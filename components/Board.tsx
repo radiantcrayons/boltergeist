@@ -59,8 +59,9 @@ function enter(el: HTMLElement, delay: number) {
   el.animate({ opacity: [0, 1], translate: ["0 12px", "0 0"], scale: [0.97, 1] }, { duration: 460, delay, easing: EASE, fill: "backwards" });
 }
 
-// Everyone in the game, best first: each panel slides to its new place when the order changes.
-export function Board({ game, round, waiting }: Props) {
+// Everyone in the game, best first: each panel slides to its new place when the order changes. Drawn again only when the game
+// or the round changes, not on every tick of the clock.
+export const Board = memo(function Board({ game, round, waiting }: Props) {
   const list = useRef<HTMLOListElement>(null);
   const tops = useRef(new Map<string, number>());
   const gone = useRef(new Set<string>());
@@ -135,7 +136,7 @@ export function Board({ game, round, waiting }: Props) {
       </ol>
     </aside>
   );
-}
+});
 
 // One player. It pulses as they spring into a call, flashes and dims when they go out, and shines as you climb or someone takes the lead.
 const Panel = memo(function Panel({ id, place, name, role, bot, live, you, hue, text, tone, g, title }: Seat) {

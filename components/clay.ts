@@ -398,6 +398,33 @@ export function paintSpook(kind: GhostKind, body: RGB, px: number, frame: number
   );
 }
 
+// A zombie's head, up out of the ground beside its hand: a lumpy skull with a heavy brow, sunken sockets with a yellow glint in
+// each, and a slack mouth of broken teeth. Turned like the ghosts, so it looks along the field like everything else.
+export function paintZombie(skin: RGB, px: number, turn: number): Figure {
+  const parts: Part[] = [
+    lump(-0.2, 0, 3.1, [2.5, 2.7, 2.9], skin),
+    lump(0.7, 0, 1.6, [1.7, 1.9, 1.15], tone(skin, 0.9)),
+    lump(1.9, 0, 4.3, [0.6, 1.8, 0.45], tone(skin, 0.82)),
+    lump(-0.3, -2.55, 3.2, [0.45, 0.4, 0.8], tone(skin, 0.88)),
+    lump(-0.3, 2.55, 3.2, [0.45, 0.4, 0.8], tone(skin, 0.88)),
+    lump(2.1, 0.15, 1.85, [0.45, 1.05, 0.42], INK),
+  ];
+  for (const s of [-1, 1]) {
+    parts.push(lump(2.05, s * 1.0, 3.5, [0.5, 0.72, 0.68], tone(skin, 0.38)));
+    parts.push(lump(2.4, s * 1.0, 3.5, [0.28, 0.32, 0.32], EMBER, true));
+  }
+  for (const t of [-0.45, 0.1, 0.62]) parts.push(lump(2.42, t, 2.12, [0.2, 0.2, 0.24], TEETH));
+  const a = ((turn % ANGLES) / ANGLES) * Math.PI * 2;
+  const r = yaw(a);
+  return render(
+    parts.map((q) => ({ ...q, c: turned(r, q.c), m: times(r, q.m) })),
+    px,
+    7,
+    4,
+    8,
+  );
+}
+
 // The price: three frightened children huddled together walking east, the eldest holding a lantern out ahead.
 type Child = { at: [number, number]; tall: number; turn: number; lag: number; hair: RGB; top: RGB; legs: RGB; style: "tuft" | "bunches" | "hat" };
 const KID_SKIN: RGB = [238, 188, 152];

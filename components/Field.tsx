@@ -6,7 +6,7 @@ import { play } from "@/lib/sfx";
 import type { Role, Side } from "@/lib/game/war";
 import type { Candle } from "@/lib/types";
 import { COLORS, niceStep, type Mark, type Pick, type Pin } from "./marks";
-import { ANGLES, KIDS_LEAD, kidsLantern, kidsTorch, paintCloud, paintKids, paintSpook, type Figure, type GhostKind } from "./clay";
+import { ANGLES, KIDS_LEAD, kidsLantern, kidsTorch, paintCloud, paintKids, paintSpook, paintZombie, type Figure, type GhostKind } from "./clay";
 import { GHOST_KIND } from "./Spirit";
 import { paintTree } from "./trees";
 
@@ -327,8 +327,17 @@ function signalOf(coin: string) {
 // and forks every way in three dimensions, so its spindles reach out toward and away from the viewer as well as across, and where it
 // lands, sparks crawl off along the ground. Seen through the field's view by see.
 type P3 = { x: number; y: number; z: number };
+// Each bolt's shape is worked out once, from where it lands, and kept for the moment it flickers.
+const bolted = new Map<string, { pts: P3[]; w: number }[]>();
 function lightning3d(ctx: Ctx, a: P3, b: P3, seed: number, size: number, see: (p: P3) => Pt, alpha = 1) {
-  const paths: { pts: Pt[]; w: number }[] = [];
+  const shape = kept(bolted, `${seed}`, 48, () => boltShape({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }, seed));
+  const paths = shape.map(({ pts, w }) => ({ pts: pts.map((p) => see({ x: p.x + b.x, y: p.y + b.y, z: p.z + b.z })), w }));
+  glowing(ctx, paths, size, alpha);
+}
+
+function boltShape(a: P3, seed: number) {
+  const b: P3 = { x: 0, y: 0, z: 0 };
+  const paths: { pts: P3[]; w: number }[] = [];
   let n = 0;
   const rnd = () => hash(seed * 0.91 + n++ * 1.618) * 2 - 1;
   const split = (p: P3, q: P3, depth: number): P3[] => {
@@ -339,7 +348,7 @@ function lightning3d(ctx: Ctx, a: P3, b: P3, seed: number, size: number, see: (p
   };
   const grow = (p: P3, q: P3, w: number, depth: number, level: number) => {
     const pts = split(p, q, depth);
-    paths.push({ pts: pts.map(see), w });
+    paths.push({ pts, w });
     if (level > 1) return;
     const reach = Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z);
     for (let i = 2; i < pts.length - 2; i++) {
@@ -356,7 +365,7 @@ function lightning3d(ctx: Ctx, a: P3, b: P3, seed: number, size: number, see: (p
     const len = 0.35 + Math.abs(rnd()) * 0.6;
     grow(b, { x: b.x + Math.cos(turn) * len, y: b.y + Math.sin(turn) * len, z: 0 }, 0.4, 3, 2);
   }
-  glowing(ctx, paths, size, alpha);
+  return paths;
 }
 
 // Strokes of lightning drawn as light: a wide blue glow, a narrower one, and a thin white core.
@@ -411,9 +420,28 @@ function shine(ctx: Ctx, x: number, y: number, rx: number, ry: number, rgb: stri
 // A soft round shadow or glow on the ground, fading out to its edge.
 const blob = (ctx: Ctx, x: number, y: number, rx: number, ry: number, color: RGB, alpha: number) => shine(ctx, x, y, rx, ry, rgbOf(color), alpha, false);
 
-// The clay figures, each look, size and frame made once and kept.
+// The clay figures, each look, size and frame made once and kept, up to a budget of memory, the least lately used going first.
 const figures = new Map<string, Figure>();
-const figure = (key: string, make: () => Figure) => kept(figures, key, 900, make);
+let figureBytes = 0;
+const bytesOf = (f: Figure) => f.canvas.width * f.canvas.height * 4;
+const budget = () => (typeof window !== "undefined" && (innerWidth < 600 || matchMedia("(pointer: coarse)").matches) ? 24e6 : 64e6);
+function figure(key: string, make: () => Figure): Figure {
+  const was = figures.get(key);
+  if (was) {
+    figures.delete(key);
+    figures.set(key, was);
+    return was;
+  }
+  const made = make();
+  figures.set(key, made);
+  figureBytes += bytesOf(made);
+  for (const [k, f] of figures) {
+    if (figureBytes <= budget() || figures.size <= 1) break;
+    figures.delete(k);
+    figureBytes -= bytesOf(f);
+  }
+  return made;
+}
 // Your own ghosts are mint either way; rivals' come in hues of their own.
 const GHOSTS: Record<Side, RGB> = { long: [124, 232, 192], short: [124, 232, 192] };
 const FIELD_SIZE: Record<GhostKind, number> = { wisp: 0.95, spectre: 1.1, poltergeist: 1.3 };
@@ -422,8 +450,9 @@ const FRAMES = 8;
 const KIDS_BACK = (KIDS_LEAD * 2.05) / 26;
 // Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
 const WORDS = 1.45;
-// Every word on the field is set at one size, in tiles tall.
+// Every word on the field is set at one size, in tiles tall; the prices you've set sit a little see-through.
 const WORD = 0.4;
+const SET = 0.72;
 
 // A torch's beam: a soft cone of warm light, drawn once and laid from the torch to where it shines.
 let beamCone: HTMLCanvasElement | null = null;
@@ -451,8 +480,34 @@ function beam() {
 const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px));
 const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant));
 const kidsAt = (px: number, stride: number) => figure(`kids|${px}|${stride}`, () => paintKids(px, stride, STRIDES));
+const ghostKey = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) => `ghost|${kind}|${body}|${px}|${frame}|${boo ? 1 : 0}|${turn}`;
 const ghostAt = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn = 0) =>
-  figure(`ghost|${kind}|${body}|${px}|${frame}|${boo ? 1 : 0}|${turn}`, () => paintSpook(kind, body, px, frame, FRAMES, boo, turn));
+  figure(ghostKey(kind, body, px, frame, boo, turn), () => paintSpook(kind, body, px, frame, FRAMES, boo, turn));
+
+// Figures wanted soon are made in the browser's quiet moments between frames, a few at a time, never inside one.
+const toBake = new Map<string, () => Figure>();
+let baking = false;
+const idle = (fn: (d?: IdleDeadline) => void) => (typeof requestIdleCallback === "function" ? requestIdleCallback(fn, { timeout: 400 }) : setTimeout(fn, 16));
+function bake(d?: IdleDeadline) {
+  let one = !d || d.didTimeout;
+  for (const [key, make] of toBake) {
+    if (!one && (!d || d.timeRemaining() < 4)) break;
+    one = false;
+    toBake.delete(key);
+    figure(key, make);
+  }
+  if (toBake.size) idle(bake);
+  else baking = false;
+}
+function ghostSoon(kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) {
+  const key = ghostKey(kind, body, px, frame, boo, turn);
+  if (figures.has(key) || toBake.has(key)) return;
+  toBake.set(key, () => paintSpook(kind, body, px, frame, FRAMES, boo, turn));
+  if (!baking) {
+    baking = true;
+    idle(bake);
+  }
+}
 
 
 // A hand clawing up out of the ground for an order waiting on Strike, grey-green clay touched with its side's colour: the bigger the
@@ -520,63 +575,6 @@ function moundSprite(A: number, front: boolean, wide: number) {
     }
     lump(g, ellipsePath(g, 0, 0, 7 * s, 2.8 * s), 0, 0, 7 * s, 2.8 * s, dirt);
     oval(g, 0, -0.3 * s, 3.4 * s, 1.3 * s, css(times(CLAY.soil, 0.45)));
-  });
-}
-
-// A zombie's head, for the very biggest orders: grey-green clay, a torn ear, sunken eyes glowing, a gaping mouth, a few strands of hair.
-function headSprite(A: number, tint: RGB, variant: number) {
-  const q = Math.round(A * 4) / 4;
-  const s = q / 26;
-  const r = 6.6 * s;
-  const v = variant % 4;
-  return sprite(`head|${q}|${tint}|${v}`, r * 2.6 + 8, r * 2.4 + 8, r * 1.3 + 4, r * 2.2 + 4, (g) => {
-    const skin = mix([146, 184, 124], tint, 0.14);
-    const ink = css(plus(times(skin, [0.3, 0.26, 0.28]), [10, 6, 8]));
-    const cy = -r * 1.02;
-    const tilt = [-0.18, 0.12, -0.06, 0.2][v];
-    lump(g, ellipsePath(g, -r * 0.98, cy + r * 0.08, r * 0.26, r * 0.38), -r * 0.98, cy + r * 0.08, r * 0.26, r * 0.38, times(skin, 0.92), true);
-    lump(
-      g,
-      () => {
-        g.beginPath();
-        g.ellipse(0, cy, r, r * 1.1, tilt, 0, Math.PI * 2);
-      },
-      0,
-      cy,
-      r,
-      r * 1.1,
-      skin,
-      true,
-    );
-    const socket = css(times(skin, 0.4));
-    for (const side of [-1, 1]) {
-      const ex = side * r * 0.4 + tilt * r * 0.3;
-      const ey = cy - r * 0.08 + side * tilt * r * 0.3;
-      oval(g, ex, ey, r * 0.3, r * 0.27, socket);
-      oval(g, ex + r * 0.05, ey + r * 0.03, r * 0.12, r * 0.12, "rgb(252, 230, 120)");
-    }
-    oval(g, r * 0.06, cy + r * 0.55, r * 0.34, r * 0.24, css(times(skin, 0.22)));
-    g.fillStyle = css(CLAY.offWhite);
-    for (const t of [-0.16, 0.04, 0.22]) g.fillRect(t * r, cy + r * 0.33, r * 0.12, r * 0.12);
-    g.strokeStyle = ink;
-    g.lineWidth = Math.max(1, 0.5 * s);
-    g.beginPath();
-    g.moveTo(-r * 0.5, cy - r * 0.55);
-    g.lineTo(r * 0.1, cy - r * 0.68);
-    for (let t = 0; t < 3; t++) {
-      g.moveTo(-r * (0.38 - t * 0.2), cy - r * 0.72);
-      g.lineTo(-r * (0.34 - t * 0.2), cy - r * 0.5);
-    }
-    g.stroke();
-    g.lineWidth = Math.max(1, 0.7 * s);
-    g.strokeStyle = css(times(CLAY.bark, 0.7));
-    g.beginPath();
-    for (let t = 0; t < 4; t++) {
-      const hx = (t - 1.5) * r * 0.3 + v * 0.4 * s;
-      g.moveTo(hx, cy - r * 1.02);
-      g.quadraticCurveTo(hx + (t % 2 ? 1 : -1) * r * 0.3, cy - r * 1.5, hx + (t - 1.5) * r * 0.25, cy - r * 1.35);
-    }
-    g.stroke();
   });
 }
 
@@ -892,8 +890,8 @@ function tuftSprite(A: number, variant: number) {
 // What dresses one tile of ground, worked out from where it is alone: whether a grove may stand there, and the tufts, flowers,
 // ferns and stones scattered on it, with what each becomes on open ground and what in a grove.
 type Look = [kind: number, variant: number];
-type Tile = { i: number; j: number; grove: boolean; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
-type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean };
+type Tile = { i: number; j: number; grove: boolean; outer: boolean; ox: number; pick: number; variant: number; items: { u: number; w: number; plain: Look | null; wild: Look | null }[] };
+type Grove = { i: number; j: number; ox: number; pick: number; variant: number; on: boolean; outer: boolean };
 type Deco = { u: number; w: number; tile: Grove | null; plain: Sprite | null; wild: Sprite | null };
 const LOOKS = [tuftSprite, flowerSprite, fernSprite, cloverSprite, mushroomSprite, pebbleSprite];
 function tileAt(i: number, j: number): Tile {
@@ -922,7 +920,33 @@ function tileAt(i: number, j: number): Tile {
     const wild = look(0.5);
     if (plain || wild) items.push({ u: i + hash(i * 5 + j * 11 + t), w: j + hash(i * 13 + j * 7 + t), plain, wild });
   }
-  return { i, j, grove: hash(i * 17 + j * 131) < 0.024, ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
+  // Groves dot the whole field; the outer ones only grow away from the play, so the edges read as forest.
+  const g = hash(i * 17 + j * 131);
+  return { i, j, grove: g < 0.024, outer: g < 0.075, ox: hash(i + j) * 0.7, pick: hash(i * 3 + j), variant: Math.floor(hash(i * 5 + j * 3) * 12), items };
+}
+
+// A box on the screen in device pixels; boxes that touch are joined, so each part of the screen is laid down once.
+type Box = { x: number; y: number; w: number; h: number };
+function merged(list: Box[], W: number, H: number): Box[] {
+  const out: Box[] = [];
+  for (const b0 of list) {
+    const x = Math.max(0, Math.floor(b0.x));
+    const y = Math.max(0, Math.floor(b0.y));
+    let b = { x, y, w: Math.min(W, Math.ceil(b0.x + b0.w)) - x, h: Math.min(H, Math.ceil(b0.y + b0.h)) - y };
+    if (b.w <= 0 || b.h <= 0) continue;
+    for (let i = 0; i < out.length; i++) {
+      const o = out[i];
+      if (b.x <= o.x + o.w && b.x + b.w >= o.x && b.y <= o.y + o.h && b.y + b.h >= o.y) {
+        const l = Math.min(b.x, o.x);
+        const t = Math.min(b.y, o.y);
+        b = { x: l, y: t, w: Math.max(b.x + b.w, o.x + o.w) - l, h: Math.max(b.y + b.h, o.y + o.h) - t };
+        out.splice(i, 1);
+        i = -1;
+      }
+    }
+    out.push(b);
+  }
+  return out;
 }
 
 // What throws a long shadow when lightning lights it: where it stands, how high it floats, how far it has risen out of the ground,
@@ -987,8 +1011,13 @@ export function Field(props: Props) {
   const soaked = useRef<{ c: HTMLCanvasElement | null; n: number; level: number }>({ c: null, n: -1, level: -1 });
   const hover = useRef<Pt | null>(null);
   const soft = useRef<HTMLCanvasElement | null>(null);
-  const standing = useRef<HTMLCanvasElement | null>(null);
   const writing = useRef<HTMLCanvasElement | null>(null);
+  const asked = useRef("");
+  const trodden = useRef({ key: "", seen: new Map<string, boolean>() });
+  // The field's place on the page, read once and again only when the page moves or resizes; and the cursor last set.
+  const placed = useRef<DOMRect | null>(null);
+  const cursor = useRef("");
+  const written = useRef<Box[]>([]);
   // A finger aims by dragging and places on lifting; the click a tap also fires is then passed over.
   const aiming = useRef(false);
   const tapped = useRef(false);
@@ -1011,8 +1040,12 @@ export function Field(props: Props) {
 
   // The price where the pointer is on the field, or null off it: taken from where the kids are drawn, so a click north of them is
   // always above the price even while they're catching up with it.
+  function onPage(): DOMRect | null {
+    return (placed.current ??= wrap.current?.getBoundingClientRect() ?? null);
+  }
+
   function priceUnder(clientX: number, clientY: number): number | null {
-    const box = wrap.current?.getBoundingClientRect();
+    const box = onPage();
     if (!box || !ground.current.rowSize) return null;
     if (clientX < box.left || clientX > box.right || clientY < box.top || clientY > box.bottom) return null;
     const { v, priceAt } = project();
@@ -1095,7 +1128,7 @@ export function Field(props: Props) {
           t = tileAt(i, j);
           known.set(id, t);
         }
-        const grove = t.grove ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false } : null;
+        const grove = t.outer ? { i, j, ox: t.ox, pick: t.pick, variant: t.variant, on: false, outer: !t.grove } : null;
         if (grove) groves.push(grove);
         for (const it of t.items) low.push({ u: it.u, w: it.w, tile: grove, plain: art(it.plain), wild: art(it.wild) });
       }
@@ -1110,29 +1143,9 @@ export function Field(props: Props) {
     if (!c || !view.current.w) return;
     let ctx = c.getContext("2d")!;
     const field = ctx;
-    // A clear layer the size of the field, set to draw as the field does.
-    const layer = (ref: { current: HTMLCanvasElement | null }) => {
-      const l = (ref.current ??= document.createElement("canvas"));
-      if (l.width !== c.width || l.height !== c.height) {
-        l.width = c.width;
-        l.height = c.height;
-      }
-      const lc = l.getContext("2d")!;
-      lc.setTransform(1, 0, 0, 1, 0, 0);
-      lc.globalAlpha = 1;
-      lc.globalCompositeOperation = "source-over";
-      lc.clearRect(0, 0, l.width, l.height);
-      lc.setTransform(field.getTransform());
-      return lc;
-    };
-    const lay = (l: HTMLCanvasElement) => {
-      field.save();
-      field.setTransform(1, 0, 0, 1, 0, 0);
-      field.globalAlpha = 1;
-      field.globalCompositeOperation = "source-over";
-      field.drawImage(l, 0, 0);
-      field.restore();
-    };
+    // Where each word went on the screen this frame, and each cloud, so the words can be cut and laid down only where they are.
+    const boxes: Box[] = [];
+    const veils: { c: HTMLCanvasElement; x: number; y: number; w: number; h: number }[] = [];
     const { candles, intervalMs, mark, tickSize, reach, yours, role, walls = [], blasts = [], marks, pins = [], pick, coin } = latest.current;
     const kind = GHOST_KIND[role];
     // On the field the stakes' sizes are closer together than in the portraits, so even a wisp stands out.
@@ -1384,10 +1397,21 @@ export function Field(props: Props) {
     const j0 = Math.floor(g.cy - R / 2 + ext.y0) - 1;
     const j1 = Math.ceil(g.cy - R / 2 + ext.y1) + 1;
     // Nothing grows on the trail.
+    // Whether a spot lies on the trail. Where the trail has been is settled once its candle closes, so those answers are kept by
+    // their place in the world until the scale changes.
+    const settled = candles.length ? candles[candles.length - 1].t : 0;
+    const scaleKey = `${g.rowSize}|${intervalMs}`;
+    if (trodden.current.key !== scaleKey || trodden.current.seen.size > 6000) trodden.current = { key: scaleKey, seen: new Map() };
     const bare = (x: number, y: number) => {
       if (x > 0.15) return false;
-      const p = where(now + x * intervalMs);
-      return p !== null && Math.abs(yOf(p) - y) < 0.24;
+      const t = now + x * intervalMs;
+      const id = t < settled ? `${Math.round((x + nowX) * 64)}|${Math.round((y + g.cy) * 64)}` : null;
+      const kept = id === null ? undefined : trodden.current.seen.get(id);
+      if (kept !== undefined) return kept;
+      const p = where(t);
+      const on = p !== null && Math.abs(yOf(p) - y) < 0.24;
+      if (id !== null) trodden.current.seen.set(id, on);
+      return on;
     };
     const dec = groundFor(i0, i1, j0, j1, A, dpr);
     for (const tile of dec.groves) {
@@ -1395,18 +1419,22 @@ export function Field(props: Props) {
       const x = tile.i - nowX + tile.ox;
       const y = tile.j + 0.5 - g.cy + R / 2;
       if (!seen(S(x, y), 10) || !clear.every((yc) => Math.abs(yc - y) > 1) || bare(x, y)) continue;
+      // Near the kids and the play around them everything tall goes faint, so the game is never hidden behind it; out past the
+      // play the outer groves grow in.
+      const d = Math.hypot(x + KIDS_BACK, y - y0);
+      const grown = tile.outer ? clamp((d - 6) / 1.5, 0, 1) : 1;
+      if (grown <= 0) continue;
       tile.on = true;
-      // Whatever the kids walk through goes faint, so they're never lost behind it.
-      const faint = clamp((Math.hypot(x, y - y0) - 0.5) / 0.9, 0.3, 1);
+      const faint = (0.15 + 0.85 * clamp((d - 3) / 3, 0, 1)) * grown;
       const { pick, variant } = tile;
       if (pick < 0.62) {
         const size = variant === 10 ? 0.7 : variant % 3 === 0 ? 1.15 : 1;
         const f = treeAt(Math.round((A / 28) * (variant % 3 === 0 ? 1.15 : 1) * dpr * 10) / 10, variant);
         shadows.push(() => {
           const p = S(x, y);
-          blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * sun);
+          blob(ctx, p.x, p.y, 0.8 * A * size, 0.38 * A * size, [92, 108, 136], 0.6 * sun * faint);
         });
-        casters.push({ x, y, shape: () => shapeOf(f, dpr) });
+        if (faint > 0.5) casters.push({ x, y, shape: () => shapeOf(f, dpr) });
         put(x, y, () => {
           const p = S(x, y);
           ctx.globalAlpha = faint;
@@ -1417,9 +1445,9 @@ export function Field(props: Props) {
         const sp = deadSprite(A, variant);
         shadows.push(() => {
           const p = S(x, y);
-          blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * sun);
+          blob(ctx, p.x, p.y, 0.45 * A, 0.22 * A, [92, 108, 136], 0.45 * sun * faint);
         });
-        casters.push({ x, y, shape: () => sp });
+        if (faint > 0.5) casters.push({ x, y, shape: () => sp });
         put(x, y, () => blit(ctx, sp, S(x, y), faint));
       } else if (pick < 0.83) put(x, y, () => blit(ctx, stumpSprite(A, variant), S(x, y), faint));
       else if (pick < 0.92) {
@@ -1450,6 +1478,7 @@ export function Field(props: Props) {
       ctx.globalAlpha = alpha;
       ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
       ctx.globalAlpha = 1;
+      veils.push({ c: f.canvas, x: p.x - f.ox / dpr, y: p.y - f.oy / dpr, w: f.w / dpr, h: f.h / dpr });
     };
     const bolts: (() => void)[] = [];
     const flashes: Glow[] = [];
@@ -1462,7 +1491,6 @@ export function Field(props: Props) {
       const from = call ? Math.max(summoned, call.at + (call.maker ? 1800 : 1600)) : Infinity;
       const seed = summoned % 997;
       const strikeX = (j: number) => (from + j * STRIKE_MS) / intervalMs - nowX + cloudX + (hash(j * 7.1 + seed) - 0.5) * 1.4;
-      line(ctx, S(0.3, yf), S(ext.x1, yf), css(CLAY.yellow, 0.85), 2, [4, 6]);
       const j1 = from === Infinity ? -1 : Math.floor((now - from) / STRIKE_MS);
       if (j1 >= 0 && from + j1 * STRIKE_MS > m.struck && !reduced()) {
         m.struck = from + j1 * STRIKE_MS;
@@ -1598,7 +1626,12 @@ export function Field(props: Props) {
           const eh = clamp((e - 0.3) / 0.7, 0, 1);
           const bob = calm ? 0 : Math.sin(at / 700 + h.seed * 20) * 0.6 * k;
           const q = { x: p.x - 5.5 * k, y: p.y + 1.5 * k + bob };
-          risen(headSprite(A, tint, Math.floor(h.seed * 40)), q, eh, fade, 1.4 * k);
+          // Looking south toward the kids from north of them, east along the field from south of them.
+          const turn = y < y0 ? 4 : 28;
+          const skin = mix([146, 184, 124], tint, 0.14).map(Math.round) as RGB;
+          const hpx = Math.round(0.094 * A * dpr * 10) / 10;
+          const hf = figure(`zombie|${hpx}|${skin}|${turn}`, () => paintZombie(skin, hpx, turn));
+          risen({ c: hf.canvas, ox: hf.ox / dpr, oy: hf.oy / dpr, w: hf.w / dpr, h: hf.h / dpr }, q, eh, fade, 1.4 * k);
           if (eh > 0.6) glows.push({ p: { x: q.x, y: q.y - 7.4 * k }, r: 0.4 * A, rgb: "252, 226, 120", a: 0.38 * fade });
         }
         risen(arm, { x: p.x + (h.head ? 4 * k : 0), y: p.y }, e, fade, 1.4 * k);
@@ -1670,12 +1703,20 @@ export function Field(props: Props) {
     // up a line of time, its foot at (x, y), all at one size. Drawn after the dusk so it stays clear, and cut away wherever something
     // stands in front of it.
     const labels: (() => void)[] = [];
-    const marking = (text: string, x: number, y: number, color: string, o: { align?: CanvasTextAlign; up?: boolean; halo?: boolean; glow?: boolean; weight?: number } = {}) => {
+    const marking = (text: string, x: number, y: number, color: string, o: { align?: CanvasTextAlign; up?: boolean; halo?: boolean; glow?: boolean; weight?: number; alpha?: number } = {}) => {
       const f = (A * WORD * WORDS * (v.w < 600 ? 1.06 : 1)) / 26;
       const at0 = S(x, y);
+      const m = o.up ? [dpr * f, (-dpr * f) / 2, dpr * f, (dpr * f) / 2] : [dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2];
+      // Its box on the screen, from its box in its own lettering, padded for the halo.
+      const boxed = (x0: number, x1: number, y0: number, y1: number) => {
+        const px = [x0 - 5, x1 + 5, x0 - 5, x1 + 5].map((u, i) => m[0] * u + m[2] * (i < 2 ? y0 - 5 : y1 + 5) + dpr * at0.x);
+        const py = [x0 - 5, x1 + 5, x0 - 5, x1 + 5].map((u, i) => m[1] * u + m[3] * (i < 2 ? y0 - 5 : y1 + 5) + dpr * at0.y);
+        const l = Math.min(...px);
+        const t = Math.min(...py);
+        boxes.push({ x: l, y: t, w: Math.max(...px) - l, h: Math.max(...py) - t });
+      };
       ctx.save();
-      if (o.up) ctx.setTransform(dpr * f, (-dpr * f) / 2, dpr * f, (dpr * f) / 2, dpr * at0.x, dpr * at0.y);
-      else ctx.setTransform(dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2, dpr * at0.x, dpr * at0.y);
+      ctx.setTransform(m[0], m[1], m[2], m[3], dpr * at0.x, dpr * at0.y);
       if (o.glow) ctx.globalCompositeOperation = "lighter";
       const font = `${o.weight ?? 700} 26px ${o.weight === 400 ? DISPLAY : MONO}`;
       // The many faint numbers along the rows are set once each and laid down as pictures, once the face they're set in has loaded.
@@ -1687,11 +1728,13 @@ export function Field(props: Props) {
         ctx.globalAlpha = Number(alpha);
         ctx.drawImage(wd.c, shift - wd.left, -wd.asc, wd.w, wd.h);
         ctx.restore();
+        boxed(shift - wd.left, shift - wd.left + wd.w, -wd.asc, -wd.asc + wd.h);
         return;
       }
       ctx.font = font;
       ctx.textAlign = o.align ?? "left";
       ctx.textBaseline = "alphabetic";
+      if (o.alpha !== undefined) ctx.globalAlpha = o.alpha;
       if (o.halo !== false && !o.glow) {
         ctx.lineJoin = "round";
         ctx.lineWidth = 6;
@@ -1700,7 +1743,10 @@ export function Field(props: Props) {
       }
       ctx.fillStyle = color;
       ctx.fillText(text, 0, 0);
+      const tw = ctx.measureText(text).width;
+      const from = o.align === "center" ? -tw / 2 : o.align === "right" || o.align === "end" ? -tw : 0;
       ctx.restore();
+      boxed(from, from + tw, -22, 7);
     };
     // Rising, each ghost spins once round on its own, showing itself from every side, then turns to face the kids. It's drawn from
     // its full size figure at every turn, made ahead a few a frame while the graves wait, so the swirl never stops to make them.
@@ -1709,19 +1755,25 @@ export function Field(props: Props) {
       const a = Math.atan2(y0 - y, kx - x) - Math.PI / 4;
       return ((Math.round((a / (Math.PI * 2)) * ANGLES) % ANGLES) + ANGLES) % ANGLES;
     };
+    // While the graves wait, the rise's every turn and the walk the ghosts will take facing the kids are made between frames.
     if (yours.trap && !yours.call && !reduced()) {
-      const until = performance.now() + 2;
       const body = GHOSTS[yours.trap.side];
-      for (let t = 0; t < ANGLES && performance.now() < until; t++) ghostAt(kind, body, Math.round(1.9 * scale * k * dpr * 10) / 10, 0, true, t);
+      const px = Math.round(1.9 * scale * k * dpr * 10) / 10;
+      const ya = yOf(yours.trap.price);
+      const ask = `${kind}|${px}|${yours.trap.count}|${Math.round(ya - y0)}`;
+      if (asked.current !== ask) {
+        asked.current = ask;
+        for (let t = 0; t < ANGLES; t++) ghostSoon(kind, body, px, 0, true, t);
+        for (const { x, dy } of row(yours.trap.count)) for (let fr = 0; fr < FRAMES; fr++) ghostSoon(kind, body, px, fr, true, facing(x, ya + dy));
+      }
     }
     if (yours.trap && !yours.call) {
       const ya = yOf(yours.trap.price);
       if (onMap(ya)) {
         graveRow(ya, yours.trap.count, yours.trap.side, 1);
-        const at0 = row(yours.trap.count)[0].x;
         const price = fmt.price(yours.trap.price, tickSize);
         const color = TEAMS[yours.trap.side].ui;
-        labels.push(() => marking(price, at0 - across * 0.6, ya + 0.62, color, { align: "right" }));
+        labels.push(() => marking(price, 0, ya + 0.95, color, { align: "center", alpha: SET }));
       }
     }
     let spooked = 0;
@@ -1769,7 +1821,7 @@ export function Field(props: Props) {
     if (yours.flag && yf !== null) {
       const banks = yours.flag.banks;
       const text = `${fmt.price(yours.flag.price, tickSize)}${banks !== undefined ? `  ${fmt.money(banks, true)}` : ""}`;
-      labels.push(() => marking(text, cloudX, yf + 0.7, COLORS.volt, { align: "center" }));
+      labels.push(() => marking(text, 0, yf + 0.95, COLORS.volt, { align: "center", alpha: SET }));
     }
 
     // Everyone else's ghosts, each player in their own hue, out toward the fog on the row where their graves wait or they came in:
@@ -1842,13 +1894,15 @@ export function Field(props: Props) {
     shadows.forEach((fn) => fn());
     // Each one's own silhouette, laid flat on the ground away from the strike: its height runs off along the ground, longer the
     // nearer the strike, and its width lies across, kept the way round it's drawn.
+    // On a phone only what stands near the strike throws a long shadow.
+    const shadowReach = v.w < 600 || coarse() ? 3.5 : 6;
     for (const c of casters) {
       if (!glare.length) break;
       const f = S(c.x, c.y);
       let shape: Shape | null = null;
       for (const src of glare) {
         const d = Math.hypot(c.x - src.x, c.y - src.y);
-        if (d > 6 || d < 0.05) continue;
+        if (d > shadowReach || d < 0.05) continue;
         const o = S(src.x, src.y);
         const len = Math.hypot(f.x - o.x, f.y - o.y) || 1;
         const dx = (f.x - o.x) / len;
@@ -1865,13 +1919,9 @@ export function Field(props: Props) {
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = "source-over";
     ctx.restore();
-    // Everything standing goes down on a layer of its own, so the words on the ground can be cut away wherever something stands.
-    ctx = layer(standing);
     stood.sort((a, b) => a.d - b.d).forEach((s) => s.draw());
     if (yf !== null) drawCloud(cloudX, yf, 1);
     for (const f of fading) drawCloud(f.x, f.y, f.alpha);
-    ctx = field;
-    lay(standing.current!);
 
     // Further into the future the haze thickens until the land is lost in it, and the far ground fades into the sky along the top.
     const fogFrom = S(F, 0);
@@ -1907,7 +1957,7 @@ export function Field(props: Props) {
           [0.1 * (1 - wet), CLAY.haze],
           [0.22 * wet, [34, 42, 66] as RGB],
         ] as const) {
-          if (alpha < 0.01 || cx + r < 0 || cx - r > v.w) continue;
+          if (alpha < 0.05 || cx + r < 0 || cx - r > v.w) continue;
           blob(ctx, cx, cy, r, r * 0.38, color, alpha);
         }
       }
@@ -1915,7 +1965,8 @@ export function Field(props: Props) {
 
     // Rain, heavier round by round: a drop falling slantwise in each patch of the view, and a splash where it lands.
     if (wet > 0.04) {
-      const cell = 17;
+      // On a phone the drops fall a little further apart: the same rain, fewer strokes.
+      const cell = v.w < 600 || coarse() ? 24 : 17;
       const fall = 150;
       const cols = Math.ceil(v.w / cell) + 8;
       const rows = Math.ceil(v.h / cell) + 2;
@@ -1968,7 +2019,7 @@ export function Field(props: Props) {
     ctx.globalCompositeOperation = "lighter";
     // Fireflies over the grass while it's dry, fewer on a phone's smaller field, and a pool of lantern light on the ground about them.
     const dry = 1 - wet;
-    if (dry > 0.05 && !reduced()) {
+    if (dry >= 0.3 && !reduced()) {
       const t = at / 1000;
       for (let n = 0; n < (v.w < 600 ? 16 : 26); n++) {
         const blink = Math.max(0, Math.sin(t * (1.3 + hash(n) * 1.4) + n * 2.7));
@@ -2007,7 +2058,7 @@ export function Field(props: Props) {
         ctx.restore();
       }
     }
-    for (const glow of [...glows, ...flashes]) shine(ctx, glow.p.x, glow.p.y, glow.r, glow.r, glow.rgb, glow.a, true);
+    for (const glow of [...glows, ...flashes]) if (glow.a >= 0.05) shine(ctx, glow.p.x, glow.p.y, glow.r, glow.r, glow.rgb, glow.a, true);
     ctx.globalCompositeOperation = "source-over";
     bolts.forEach((fn) => fn());
 
@@ -2055,9 +2106,30 @@ export function Field(props: Props) {
       ctx.restore();
     }
 
+    // A fill: a puff of dust where the hand was, in the candle they're in.
+    for (const b of blasts) {
+      const y = Math.round(worldY(b.p) * 2) / 2 - g.cy + R / 2;
+      const t = clamp((now - b.at) / 900, 0, 1);
+      const q = S(col + 0.5 - nowX, y, 6);
+      if (!seen(q)) continue;
+      for (let i = 0; i < 5; i++) oval(ctx, q.x + Math.cos(i * 1.3) * 10 * t, q.y + Math.sin(i * 1.3) * 5 * t - 6 * t, 4 + 6 * t, 3 + 4 * t, css(CLAY.haze, 0.8 * (1 - t)));
+    }
+
     // The words on the ground go down last so the dusk and rain don't dull them, but trees, kids, ghosts, hands and clouds still stand
-    // in front of them.
-    ctx = layer(writing);
+    // in front of them: they're set on a layer of their own, cleared only where last frame's words were.
+    const page = (writing.current ??= document.createElement("canvas"));
+    const fresh = page.width !== c.width || page.height !== c.height;
+    if (fresh) {
+      page.width = c.width;
+      page.height = c.height;
+    }
+    const words = page.getContext("2d")!;
+    words.setTransform(1, 0, 0, 1, 0, 0);
+    words.globalAlpha = 1;
+    words.globalCompositeOperation = "source-over";
+    if (!fresh) for (const r of written.current) words.clearRect(r.x, r.y, r.w, r.h);
+    words.setTransform(field.getTransform());
+    ctx = words;
 
     // Who's been knocked out, where it happened.
     for (const mk of marks) {
@@ -2083,39 +2155,34 @@ export function Field(props: Props) {
       }
     }
 
-    // A fill: a puff of dust where the hand was, in the candle they're in.
-    for (const b of blasts) {
-      const y = Math.round(worldY(b.p) * 2) / 2 - g.cy + R / 2;
-      const t = clamp((now - b.at) / 900, 0, 1);
-      const q = S(col + 0.5 - nowX, y, 6);
-      if (!seen(q)) continue;
-      for (let i = 0; i < 5; i++) oval(ctx, q.x + Math.cos(i * 1.3) * 10 * t, q.y + Math.sin(i * 1.3) * 5 * t - 6 * t, 4 + 6 * t, 3 + 4 * t, css(CLAY.haze, 0.8 * (1 - t)));
-    }
     labels.forEach((fn) => fn());
     // The price, marked on the ground just south of the kids' feet.
-    marking(fmt.price(target, tickSize), 0, y0 + 1.05, COLORS.volt, { align: "center" });
-
-    // A faint line of now, through the kids and on south of them.
-    ctx.save();
-    ctx.globalCompositeOperation = "lighter";
-    ctx.setLineDash([6, 8]);
-    ctx.strokeStyle = "rgba(255, 225, 74, 0.22)";
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(S(0, ext.y1).x, S(0, ext.y1).y);
-    ctx.lineTo(S(0, y0 + 1.5).x, S(0, y0 + 1.5).y);
-    ctx.stroke();
-    ctx.restore();
+    marking(fmt.price(target, tickSize), 0, y0 + 1.05, "#f4f8f6", { align: "center", alpha: SET });
 
     const hovered = hover.current ? priceUnder(hover.current.x, hover.current.y) : null;
     ctx = field;
-    const words = writing.current!.getContext("2d")!;
+    // Each word is cut away under whatever stands over it, then laid down on the field, only where words are.
+    const spots = merged(boxes, c.width, c.height);
+    const over = (x: number, y: number, w: number, h: number) => spots.some((r) => x < r.x + r.w && x + w > r.x && y < r.y + r.h && y + h > r.y);
     words.save();
     words.setTransform(1, 0, 0, 1, 0, 0);
     words.globalCompositeOperation = "destination-out";
-    words.drawImage(standing.current!, 0, 0);
+    for (const k of casters) {
+      const sh = k.shape();
+      const q = S(k.x, k.y);
+      const x = (q.x - sh.ox) * dpr;
+      const y = (q.y - sh.oy - (k.z ?? 0)) * dpr;
+      if (over(x, y, sh.w * dpr, sh.h * dpr)) words.drawImage(sh.c, x, y, sh.w * dpr, sh.h * dpr);
+    }
+    for (const w of veils) if (over(w.x * dpr, w.y * dpr, w.w * dpr, w.h * dpr)) words.drawImage(w.c, w.x * dpr, w.y * dpr, w.w * dpr, w.h * dpr);
     words.restore();
-    lay(writing.current!);
+    field.save();
+    field.setTransform(1, 0, 0, 1, 0, 0);
+    field.globalAlpha = 1;
+    field.globalCompositeOperation = "source-over";
+    for (const r of spots) field.drawImage(page, r.x, r.y, r.w, r.h, r.x, r.y, r.w, r.h);
+    field.restore();
+    written.current = spots;
 
     const picked = hovered !== null && pick ? pick(hovered) : null;
     // What a click here would put on the field, shown faintly where it would go.
@@ -2124,14 +2191,14 @@ export function Field(props: Props) {
       const y = yOf(p);
       if (picked.art === "cloud") drawCloud(CLOUD_OFF, y, 0.5);
       else if (picked.art) for (const [j, at0] of row(picked.art.count).entries()) blit(ctx, graveSprite(A, picked.art.side, j, scale * 1.5), S(at0.x, y + at0.dy * 0.8), 0.5);
-      const box = wrap.current!.getBoundingClientRect();
+      const box = onPage()!;
       const hx = hover.current!.x - box.left;
       const hy = hover.current!.y - box.top;
-      const xc = ((hx - v.OX) / A + (2 * (hy - v.OY)) / A) / 2;
       if (aiming.current) oval(ctx, hx, hy, 16, 16, undefined, picked.color, 2);
-      marking(`${picked.label.toUpperCase()}  ${fmt.price(p, tickSize)}`.trim(), xc, y + (aiming.current ? -1.1 : 0.62), picked.color, { align: "center" });
+      marking(`${picked.label.toUpperCase()}  ${fmt.price(p, tickSize)}`.trim(), 0, y + (aiming.current ? -1.1 : 0.62), picked.color, { align: "center", alpha: SET });
     }
-    if (wrap.current) wrap.current.style.cursor = picked ? "crosshair" : "";
+    const pointer = picked ? "crosshair" : "";
+    if (wrap.current && cursor.current !== pointer) wrap.current.style.cursor = cursor.current = pointer;
   }
 
   useEffect(() => {
@@ -2139,6 +2206,7 @@ export function Field(props: Props) {
     const resize = () => {
       const c = canvas.current;
       if (!c) return;
+      placed.current = null;
       const { width, height } = el.getBoundingClientRect();
       DPR = ratioFor(width);
       c.width = Math.round(width * DPR);
@@ -2165,10 +2233,13 @@ export function Field(props: Props) {
     let looked = 0;
     const sight = new IntersectionObserver(([e]) => (shown = e.isIntersecting));
     sight.observe(el);
+    const moved = () => (placed.current = null);
+    addEventListener("scroll", moved, { capture: true, passive: true });
+    addEventListener("resize", moved);
     const loop = (t: number) => {
       if (t - looked > 400) {
         looked = t;
-        covered = !!document.querySelector(".debrief, .modal");
+        covered = !!document.querySelector(".debrief, .modal, .cutscene");
       }
       if (!document.hidden && shown && !covered) draw();
       frame = requestAnimationFrame(loop);
@@ -2177,6 +2248,8 @@ export function Field(props: Props) {
     return () => {
       observer.disconnect();
       sight.disconnect();
+      removeEventListener("scroll", moved, { capture: true });
+      removeEventListener("resize", moved);
       cancelAnimationFrame(frame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

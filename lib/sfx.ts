@@ -8,7 +8,10 @@ const MUSIC = 0.32;
 const TRACK = "/music/night-a.mp3";
 
 let audio: AudioContext | null = null;
-let bus: { dry: GainNode; wet: GainNode } | null = null;
+let bus: { dry: GainNode; wet: GainNode; room: ConvolverNode } | null = null;
+// The reverb is only listened to while something rings through it, and let go a while after the last sound's tail.
+let sending = false;
+let quiet: ReturnType<typeof setTimeout> | undefined;
 let hiss: AudioBuffer | null = null;
 let on = true;
 // Silent on the start page: sound begins with the haunt button and stops on the way back out.
@@ -48,8 +51,8 @@ function outputs(a: AudioContext) {
   room.buffer = ir;
   const wet = a.createGain();
   wet.gain.value = VOLUME * 0.55;
-  wet.connect(room).connect(master);
-  bus = { dry, wet };
+  room.connect(master);
+  bus = { dry, wet, room };
   return bus;
 }
 
@@ -133,9 +136,9 @@ const VOICES: Record<Sound, { dry: Voice[]; wet?: Voice[] }> = {
   win: { dry: [chord([110, 164.8, 220, 329.6], 2.4, 0.7), thud(70, 50, 1.2, 0.4)], wet: [chord([220, 329.6, 440], 2.6, 0.4)] },
   lose: { dry: [thud(98, 38, 1.4, 0.7, "sawtooth"), filtered("lowpass", 140, 1.6, 0.7, { attack: 0.2 })], wet: [filtered("lowpass", 220, 1.8, 0.5)] },
   out: { dry: [thud(75, 40, 0.5, 0.5), filtered("lowpass", 200, 0.6, 0.4)] },
+  // Strikes come every second or so, so each is just a crack and a rumble, with no echo to keep the room ringing.
   strike: {
-    dry: [filtered("highpass", 2400, 0.05, 0.12), filtered("lowpass", 150, 0.9, 0.35, { attack: 0.06, delay: 0.05 })],
-    wet: [filtered("lowpass", 260, 1, 0.25, { delay: 0.05 })],
+    dry: [filtered("highpass", 2400, 0.05, 0.12), filtered("lowpass", 160, 0.95, 0.42, { attack: 0.06, delay: 0.05 })],
   },
   zap: { dry: [filtered("highpass", 2000, 0.07, 0.35), filtered("lowpass", 170, 1.6, 0.8, { attack: 0.08, delay: 0.06 })], wet: [filtered("lowpass", 300, 1.8, 0.6, { delay: 0.06 })] },
   thunder: {
@@ -185,6 +188,17 @@ export function play(sound: Sound) {
     const t = audio.currentTime + 0.01;
     const v = VOICES[sound];
     for (const voice of v.dry) voice(audio, out.dry, t);
-    for (const voice of v.wet ?? []) voice(audio, out.wet, t);
+    if (v.wet?.length) {
+      if (!sending) {
+        out.wet.connect(out.room);
+        sending = true;
+      }
+      clearTimeout(quiet);
+      quiet = setTimeout(() => {
+        out.wet.disconnect();
+        sending = false;
+      }, 7000);
+      for (const voice of v.wet) voice(audio, out.wet, t);
+    }
   } catch {}
 }
