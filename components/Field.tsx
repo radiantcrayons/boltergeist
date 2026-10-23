@@ -956,6 +956,23 @@ function merged(list: Box[], W: number, H: number): Box[] {
 type Shape = { c: HTMLCanvasElement; ox: number; oy: number; w: number; h: number };
 type Caster = { x: number; y: number; z?: number; tall?: number; shape: () => Shape };
 const shapeOf = (f: Figure, dpr: number): Shape => ({ c: f.canvas, ox: f.ox / dpr, oy: f.oy / dpr, w: f.w / dpr, h: f.h / dpr });
+// A figure's shape in danger red, made once per picture, laid over a ghost to flash it as a call goes wrong.
+const reds = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
+function redOf(c: HTMLCanvasElement) {
+  const was = reds.get(c);
+  if (was) return was;
+  const r = document.createElement("canvas");
+  r.width = c.width;
+  r.height = c.height;
+  const g = r.getContext("2d")!;
+  g.drawImage(c, 0, 0);
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = "rgb(255, 60, 84)";
+  g.fillRect(0, 0, r.width, r.height);
+  reds.set(c, r);
+  return r;
+}
+
 export function Field(props: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -1484,8 +1501,14 @@ export function Field(props: Props) {
     const CLOUD_OFF = -KIDS_BACK;
     const cloudX = CLOUD_OFF;
     const CLOUD_Z = 2.7 * A;
-    const drawCloud = (x: number, y: number, alpha: number) => {
-      const f = stormAt(Math.round(((A * 4.4) / 26) * dpr * 10) / 10);
+    // Three clouds along the line: yours in the middle and a smaller one either side, so the price it waits for reads as a line.
+    const CLOUDS = [
+      { dx: -1.7, s: 0.66 },
+      { dx: 0, s: 1 },
+      { dx: 1.7, s: 0.66 },
+    ];
+    const drawCloud = (x: number, y: number, alpha: number, size = 1) => {
+      const f = stormAt(Math.round(((A * 4.4 * size) / 26) * dpr * 10) / 10);
       const p = S(x, y, CLOUD_Z + (reduced() ? 0 : Math.sin(at / 900) * 0.05 * A));
       ctx.globalAlpha = alpha;
       ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
@@ -1495,41 +1518,49 @@ export function Field(props: Props) {
     const bolts: (() => void)[] = [];
     const flashes: Glow[] = [];
     // Clouds going as they strike the kids for the last time.
-    const fading: { x: number; y: number; alpha: number }[] = [];
+    const fading: { x: number; y: number; alpha: number; size: number }[] = [];
+    const drawClouds = (x: number, y: number, alpha: number) => CLOUDS.forEach((cl) => drawCloud(x + cl.dx, y, alpha, cl.s));
     if (yf !== null && yours.flag) {
       // A cloud waits in silence while your graves do: it strikes only once your ghosts are up and you're in.
       const summoned = m.summoned.get(yours.flag.price) ?? now;
       const call = yours.call;
       const from = call ? Math.max(summoned, call.at + (call.maker ? 1800 : 1600)) : Infinity;
-      const seed = summoned % 997;
-      const strikeX = (j: number) => (from + j * STRIKE_MS) / intervalMs - nowX + cloudX + (hash(j * 7.1 + seed) - 0.5) * 1.4;
-      const j1 = from === Infinity ? -1 : Math.floor((now - from) / STRIKE_MS);
-      if (j1 >= 0 && from + j1 * STRIKE_MS > m.struck && !reduced()) {
-        m.struck = from + j1 * STRIKE_MS;
+      let latest = -Infinity;
+      CLOUDS.forEach((cl, ci) => {
+        // Each cloud strikes in its turn, so between them the line is struck three times as often.
+        const start = from + (ci * STRIKE_MS) / CLOUDS.length;
+        const seed = (summoned % 997) + ci * 101;
+        const cx = cloudX + cl.dx;
+        const strikeX = (j: number) => (start + j * STRIKE_MS) / intervalMs - nowX + cx + (hash(j * 7.1 + seed) - 0.5) * 1.4 * cl.s;
+        const j1 = start === Infinity ? -1 : Math.floor((now - start) / STRIKE_MS);
+        if (j1 >= 0) latest = Math.max(latest, start + j1 * STRIKE_MS);
+        for (let j = j1; j >= 0 && j > j1 - 18; j--) {
+          const x = strikeX(j);
+          if (x < ext.x0) break;
+          const age = now - (start + j * STRIKE_MS);
+          const left = clamp(1 - age / (STRIKE_MS * 18), 0, 1);
+          const q = S(x, yf);
+          blit(ctx, scorchSprite(A, j + seed), q, 0.9 * left);
+          if (age < 600) lights.push({ p: q, r: 0.3 * A, rgb: "255, 170, 80", a: 0.5 * (1 - age / 600) });
+          if (age > 260 || reduced()) continue;
+          // The stroke flickers: lit, dark a moment, lit again.
+          const on = age < 90 || (age > 130 && age < 240);
+          if (!on) continue;
+          const top = S(cx + (x - cx) * 0.35, yf, CLOUD_Z - 0.1 * A);
+          glare.push({ x, y: yf });
+          const sky = { x: cx + (x - cx) * 0.35, y: yf, z: CLOUD_Z / A - 0.1 };
+          bolts.push(() => lightning3d(ctx, sky, { x, y: yf, z: 0 }, j * 13 + seed, (A / 34) * (0.7 + 0.3 * cl.s), (pt) => S(pt.x, pt.y, pt.z * A)));
+          flashes.push({ p: q, r: 1.1 * A * cl.s, rgb: "255, 232, 140", a: 0.55 }, { p: { x: top.x, y: top.y - 0.3 * A }, r: 1.3 * A * cl.s, rgb: "200, 210, 255", a: 0.4 });
+        }
+        shadows.push(() => {
+          const p = S(cx + 0.35 * cl.s, yf - 0.25);
+          blob(ctx, p.x, p.y, 2.1 * A * cl.s, 0.95 * A * cl.s, [118, 124, 160], 0.6);
+        });
+      });
+      if (latest > m.struck && !reduced()) {
+        m.struck = latest;
         play("strike");
       }
-      for (let j = j1; j >= 0 && j > j1 - 18; j--) {
-        const x = strikeX(j);
-        if (x < ext.x0) break;
-        const age = now - (from + j * STRIKE_MS);
-        const left = clamp(1 - age / (STRIKE_MS * 18), 0, 1);
-        const q = S(x, yf);
-        blit(ctx, scorchSprite(A, j + seed), q, 0.9 * left);
-        if (age < 600) lights.push({ p: q, r: 0.3 * A, rgb: "255, 170, 80", a: 0.5 * (1 - age / 600) });
-        if (age > 260 || reduced()) continue;
-        // The stroke flickers: lit, dark a moment, lit again.
-        const on = age < 90 || (age > 130 && age < 240);
-        if (!on) continue;
-        const top = S(cloudX + (x - cloudX) * 0.35, yf, CLOUD_Z - 0.1 * A);
-        glare.push({ x, y: yf });
-        const sky = { x: cloudX + (x - cloudX) * 0.35, y: yf, z: CLOUD_Z / A - 0.1 };
-        bolts.push(() => lightning3d(ctx, sky, { x, y: yf, z: 0 }, j * 13 + seed, A / 34, (pt) => S(pt.x, pt.y, pt.z * A)));
-        flashes.push({ p: q, r: 1.1 * A, rgb: "255, 232, 140", a: 0.55 }, { p: { x: top.x, y: top.y - 0.3 * A }, r: 1.3 * A, rgb: "200, 210, 255", a: 0.4 });
-      }
-      shadows.push(() => {
-        const p = S(cloudX + 0.35, yf - 0.25);
-        blob(ctx, p.x, p.y, 2.1 * A, 0.95 * A, [118, 124, 160], 0.6);
-      });
     }
     // Lightning comes down on the kids where they walked into your cloud: its last strike, from the cloud itself, which then goes.
     for (const p of m.past) {
@@ -1539,7 +1570,7 @@ export function Field(props: Props) {
       const ky = yOf(p.price);
       const q = S(kx, ky);
       const cx = kx + CLOUD_OFF;
-      fading.push({ x: cx, y: ky, alpha: 1 - t });
+      for (const cl of CLOUDS) fading.push({ x: cx + cl.dx, y: ky, alpha: 1 - t, size: cl.s });
       if (t < 0.4 && !reduced()) {
         glare.push({ x: kx, y: ky });
         bolts.push(() => lightning3d(ctx, { x: cx + (kx - cx) * 0.35, y: ky, z: CLOUD_Z / A - 0.1 }, { x: kx, y: ky, z: 0 }, Math.round(p.at), A / 22, (pt) => S(pt.x, pt.y, pt.z * A)));
@@ -1654,7 +1685,7 @@ export function Field(props: Props) {
     // A ghost floats a little above the ground, bobbing; its glow goes in with the dusk.
     const glows: Glow[] = [...lights];
     // A ghost's figure is made at size made and drawn at size s; rising, its frame is held so the few figures it needs are kept.
-    const spook = (x: number, y: number, side: Side, s: number, phase: number, alpha: number, boo: boolean, lift = 0, turn = 0, made = s, frame?: number) => {
+    const spook = (x: number, y: number, side: Side, s: number, phase: number, alpha: number, boo: boolean, lift = 0, turn = 0, made = s, frame?: number, danger = 0) => {
       const z = (6 + Math.sin(phase) * 2.5) * s * k + lift;
       const f = ghostAt(kind, GHOSTS[side], Math.round(1.9 * made * k * dpr * 10) / 10, frame ?? Math.floor((((phase / (Math.PI * 2)) % 1) + 1) % 1 * FRAMES), boo, turn);
       const st = s / made / dpr;
@@ -1667,8 +1698,14 @@ export function Field(props: Props) {
         const p = S(x, y, z);
         ctx.globalAlpha = alpha;
         ctx.drawImage(f.canvas, p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
+        // Going wrong, they flash red, harder and faster the nearer the bust.
+        if (danger > 0.02) {
+          const beat = reduced() ? 0.6 : 0.5 + 0.5 * Math.sin(at / (240 - 150 * danger));
+          ctx.globalAlpha = alpha * Math.min(0.85, danger * (0.35 + 0.5 * beat));
+          ctx.drawImage(redOf(f.canvas), p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
+        }
         ctx.globalAlpha = 1;
-        glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, rgb: side === "long" ? "170, 240, 210" : "250, 190, 205", a: 0.32 });
+        glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, rgb: danger > 0.3 ? "255, 90, 110" : side === "long" ? "170, 240, 210" : "250, 190, 205", a: 0.32 });
       });
     };
     // A row of your ghosts on your line, keeping pace with the kids and centred on them: as many as your power calls for, as big as
@@ -1825,7 +1862,7 @@ export function Field(props: Props) {
           const from = call.maker ? { x, y: ya + dy } : { x: x + 1.6, y: call.side === "long" ? R + 1 : -1 };
           const gx = lerp(from.x, x, go);
           const gy = lerp(from.y, ya + dy, go);
-          spook(gx, gy, call.side, scale, walk * 0.5 + j * 1.3, 0.95 - 0.7 * hurt, spooked > 0 || hurt < 0.05, 0, facing(gx, gy));
+          spook(gx, gy, call.side, scale, walk * 0.5 + j * 1.3, 0.95 - 0.7 * hurt, spooked > 0 || hurt < 0.05, 0, facing(gx, gy), scale, undefined, hurt);
         });
       }
       const yk = yOf(call.koAt);
@@ -1923,8 +1960,8 @@ export function Field(props: Props) {
     ctx.globalCompositeOperation = "source-over";
     ctx.restore();
     stood.sort((a, b) => a.d - b.d).forEach((s) => s.draw());
-    if (yf !== null) drawCloud(cloudX, yf, 1);
-    for (const f of fading) drawCloud(f.x, f.y, f.alpha);
+    if (yf !== null) drawClouds(cloudX, yf, 1);
+    for (const f of fading) drawCloud(f.x, f.y, f.alpha, f.size);
 
     // Further into the future the haze thickens until the land is lost in it, and the far ground fades into the sky along the top.
     const fogFrom = S(F, 0);
@@ -2195,7 +2232,7 @@ export function Field(props: Props) {
     if (picked) {
       const p = picked.p;
       const y = yOf(p);
-      if (picked.art === "cloud") drawCloud(CLOUD_OFF, y, 0.5);
+      if (picked.art === "cloud") drawClouds(CLOUD_OFF, y, 0.5);
       else if (picked.art) for (const [j, at0] of row(picked.art.count).entries()) blit(ctx, graveSprite(A, picked.art.side, j, scale * 1.5), S(at0.x, y + at0.dy * 0.8), 0.5);
       const box = onPage()!;
       const hx = hover.current!.x - box.left;
