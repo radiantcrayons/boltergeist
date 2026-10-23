@@ -270,57 +270,58 @@ function wordOf(text: string, font: string, color: string, scale: number) {
   });
 }
 
-// Each market's mark, cut cleanly out of a soft pool of warm light: solid in the middle, where the mark sits, and feathering out to
-// nothing at the rim. The coin's own symbol where there is one, its letters where there isn't.
+// Each market's mark, laid crisp and dark over a soft pool of warm light: solid in the middle, where the mark sits, feathering out
+// to nothing at the rim. The coin's own symbol where there is one, its letters where there isn't.
 const SIGNAL = 256;
-const SOLID = 0.6;
+const SOLID = 0.62;
+const INKED = "rgb(26, 20, 34)";
 const COINS = new Set(["ada", "bnb", "btc", "doge", "eth", "sol", "xrp", "zec"]);
-const signals = new Map<string, HTMLCanvasElement>();
+const signals = new Map<string, { pool: HTMLCanvasElement; mark: HTMLCanvasElement }>();
 function signalOf(coin: string) {
   const kept = signals.get(coin);
   if (kept) return kept;
-  const c = document.createElement("canvas");
-  c.width = c.height = SIGNAL;
-  const g = c.getContext("2d")!;
   const r = SIGNAL / 2;
-  const pool = () => {
-    g.globalCompositeOperation = "source-over";
-    g.clearRect(0, 0, SIGNAL, SIGNAL);
-    const light = g.createRadialGradient(r, r, 0, r, r, r);
-    light.addColorStop(0, "rgba(255, 214, 150, 1)");
-    light.addColorStop(SOLID, "rgba(255, 206, 140, 1)");
-    light.addColorStop(SOLID + (1 - SOLID) * 0.45, "rgba(255, 206, 140, 0.45)");
-    light.addColorStop(1, "rgba(255, 206, 140, 0)");
-    g.fillStyle = light;
-    g.fillRect(0, 0, SIGNAL, SIGNAL);
-    g.globalCompositeOperation = "destination-out";
-  };
-  pool();
-  g.font = `${SIGNAL * SOLID * (coin.length > 4 ? 0.3 : coin.length > 3 ? 0.4 : 0.5)}px ${DISPLAY}`;
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.fillText(coin, r, r + SIGNAL * 0.02);
-  g.globalCompositeOperation = "source-over";
-  signals.set(coin, c);
-  if (!COINS.has(coin.toLowerCase())) return c;
+  const pool = document.createElement("canvas");
+  pool.width = pool.height = SIGNAL;
+  const pg = pool.getContext("2d")!;
+  const light = pg.createRadialGradient(r, r, 0, r, r, r);
+  light.addColorStop(0, "rgba(255, 214, 150, 1)");
+  light.addColorStop(SOLID, "rgba(255, 206, 140, 1)");
+  light.addColorStop(SOLID + (1 - SOLID) * 0.45, "rgba(255, 206, 140, 0.45)");
+  light.addColorStop(1, "rgba(255, 206, 140, 0)");
+  pg.fillStyle = light;
+  pg.fillRect(0, 0, SIGNAL, SIGNAL);
+  const mark = document.createElement("canvas");
+  mark.width = mark.height = SIGNAL;
+  const mg = mark.getContext("2d")!;
+  mg.fillStyle = INKED;
+  mg.font = `${SIGNAL * SOLID * (coin.length > 4 ? 0.3 : coin.length > 3 ? 0.4 : 0.5)}px ${DISPLAY}`;
+  mg.textAlign = "center";
+  mg.textBaseline = "middle";
+  mg.fillText(coin, r, r + SIGNAL * 0.02);
+  const made = { pool, mark };
+  signals.set(coin, made);
+  if (!COINS.has(coin.toLowerCase())) return made;
   const img = new Image();
   img.onload = () => {
     // The symbol alone: a whole coin with the coin's picture taken away leaves just the holes the symbol makes in it.
-    const m = document.createElement("canvas");
-    m.width = m.height = SIGNAL;
-    const mg = m.getContext("2d")!;
-    mg.beginPath();
-    mg.arc(r, r, r - 1, 0, Math.PI * 2);
-    mg.fill();
-    mg.globalCompositeOperation = "destination-out";
-    mg.drawImage(img, 0, 0, SIGNAL, SIGNAL);
-    pool();
-    const s = SIGNAL * SOLID * 0.98;
-    g.drawImage(m, r - s / 2, r - s / 2, s, s);
-    g.globalCompositeOperation = "source-over";
+    const cut = document.createElement("canvas");
+    cut.width = cut.height = SIGNAL;
+    const cg = cut.getContext("2d")!;
+    cg.beginPath();
+    cg.arc(r, r, r - 1, 0, Math.PI * 2);
+    cg.fill();
+    cg.globalCompositeOperation = "destination-out";
+    cg.drawImage(img, 0, 0, SIGNAL, SIGNAL);
+    cg.globalCompositeOperation = "source-in";
+    cg.fillStyle = INKED;
+    cg.fillRect(0, 0, SIGNAL, SIGNAL);
+    mg.clearRect(0, 0, SIGNAL, SIGNAL);
+    const s = SIGNAL * SOLID;
+    mg.drawImage(cut, r - s / 2, r - s / 2, s, s);
   };
   img.src = `/coins/${coin.toLowerCase()}.svg`;
-  return c;
+  return made;
 }
 
 // A lightning bolt in the field's own space, from a point in the sky to one on the ground, positions in tiles with z up: it wanders
@@ -2067,11 +2068,14 @@ export function Field(props: Props) {
     // The coin, like a signal in the sky: a soft pool of lantern light on the ground under the kids with the market's mark cut out of it.
     const mark0 = coin ? signalOf(coin) : null;
     if (mark0) {
-      const f = (A * 1.8) / SIGNAL;
+      const f = (A * 2.2) / SIGNAL;
       ctx.save();
       ctx.setTransform(dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2, dpr * lamp.x, dpr * lamp.y);
-      ctx.globalAlpha = 0.5;
-      ctx.drawImage(mark0, -SIGNAL / 2, -SIGNAL / 2);
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(mark0.pool, -SIGNAL / 2, -SIGNAL / 2);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 0.82;
+      ctx.drawImage(mark0.mark, -SIGNAL / 2, -SIGNAL / 2);
       ctx.restore();
       ctx.globalCompositeOperation = "lighter";
     }
@@ -2269,13 +2273,22 @@ export function Field(props: Props) {
     const moved = () => (placed.current = null);
     addEventListener("scroll", moved, { capture: true, passive: true });
     addEventListener("resize", moved);
+    // The next frame is asked for first, so a frame that goes wrong is skipped rather than stopping the field for good.
+    let told = false;
     const loop = (t: number) => {
+      frame = requestAnimationFrame(loop);
       if (t - looked > 400) {
         looked = t;
         covered = !!document.querySelector(".debrief, .modal, .cutscene");
       }
-      if (!document.hidden && shown && !covered) draw();
-      frame = requestAnimationFrame(loop);
+      if (document.hidden || !shown || covered) return;
+      try {
+        draw();
+      } catch (err) {
+        if (!told) console.error("The field skipped a frame:", err);
+        told = true;
+        canvas.current?.getContext("2d")?.reset();
+      }
     };
     frame = requestAnimationFrame(loop);
     return () => {
