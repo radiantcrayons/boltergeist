@@ -335,6 +335,11 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             </div>
           ))}
         {game.over && !moment && <Debrief game={game} onAgain={onAgain} onLeave={onLeave} />}
+        {war.error && (
+          <p key={war.error} className="toast" role="alert">
+            {war.error}
+          </p>
+        )}
       </section>
 
       <Board game={game} round={round} waiting={waiting} />
@@ -403,7 +408,6 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             </div>
           )}
         </div>
-        {war.error && <p className="warning bad">{war.error}</p>}
       </section>
     </main>
   );

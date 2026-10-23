@@ -1081,6 +1081,48 @@ h2 {
   font: 22px var(--display), sans-serif;
 }
 
+/* Strike's word when something didn't go through: a small note that slides up over the foot of the field, then fades. */
+.toast {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  z-index: 6;
+  max-width: min(560px, calc(100% - 32px));
+  margin: 0;
+  padding: 7px 14px;
+  background: rgba(9, 12, 16, 0.9);
+  border: 1px solid rgba(255, 77, 109, 0.45);
+  border-radius: 10px;
+  color: var(--rose);
+  font: 13px/1.4 var(--sans), sans-serif;
+  text-align: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+  animation: toast 9s ease-out both;
+}
+
+@keyframes toast {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  4%,
+  85% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
+
 .warning {
   grid-column: 1 / -1;
   margin: -4px 0 0;
