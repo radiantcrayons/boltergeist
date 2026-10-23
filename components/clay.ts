@@ -507,7 +507,16 @@ function head(k: Child, hc: V): Part[] {
   return parts;
 }
 
-function kids(stride: number, strides: number): Part[] {
+// A point turned about a child's own spot, so each of them turns where they stand rather than the three as one.
+const about = (k: Child, v: V, turn: number): V => {
+  if (!turn) return v;
+  const d = turned(yaw(turn), [v[0] - k.at[0], v[1] - k.at[1], v[2]]);
+  return [d[0] + k.at[0], d[1] + k.at[1], d[2]];
+};
+const turnedAbout = (k: Child, parts: Part[], turn: number): Part[] =>
+  turn ? parts.map((q) => ({ ...q, c: about(k, q.c, turn), m: times(yaw(turn), q.m) })) : parts;
+
+function kids(stride: number, strides: number, turn = 0): Part[] {
   const phase = (stride / strides) * Math.PI * 2;
   const [eldest, middle, youngest] = CHILDREN;
   const bob = (k: Child) => Math.abs(Math.cos(phase + k.lag)) * 0.3 * (k.tall / 15);
@@ -515,44 +524,36 @@ function kids(stride: number, strides: number): Part[] {
   const torch = kidsTorch3(bob(middle));
   const sleeve = shoulderOf(eldest, 1, bob(eldest));
   const elbow = shoulderOf(middle, 1, bob(middle));
-  const parts = [
-    ...child(eldest, phase, [null, hand]),
-    ...child(middle, phase + middle.lag, [[sleeve[0] - 0.4, sleeve[1] + 0.6, sleeve[2] - 1.2], torch.hand]),
-    ...child(youngest, phase + youngest.lag, [[elbow[0] - 0.2, elbow[1] + 0.6, elbow[2] - 1.8], null]),
+  // Each reaches for where the other's sleeve really is once both have turned, taken back into their own unturned frame.
+  const reachFor = (from: Child, to: Child, v: V): V => about(from, about(to, v, turn), -turn);
+  const lantern: Part[] = [
+    bone(hand, [lamp[0], lamp[1], lamp[2] + 1.1], 0.14, INK),
+    part([lamp[0], lamp[1], lamp[2] + 1.05], [0.65, 0.65, 0.3], INK),
+    part([lamp[0], lamp[1], lamp[2] - 0.95], [0.6, 0.6, 0.22], INK),
+    { ...part(lamp, [0.75, 0.75, 0.95], LAMP), glow: true },
   ];
-  parts.push(bone(hand, [lamp[0], lamp[1], lamp[2] + 1.1], 0.14, INK));
-  parts.push(part([lamp[0], lamp[1], lamp[2] + 1.05], [0.65, 0.65, 0.3], INK));
-  parts.push(part([lamp[0], lamp[1], lamp[2] - 0.95], [0.6, 0.6, 0.22], INK));
-  parts.push({ ...part(lamp, [0.75, 0.75, 0.95], LAMP), glow: true });
-  parts.push(bone(torch.hand, torch.tip, 0.4, TORCH));
-  parts.push({ ...part(torch.tip, [0.46, 0.46, 0.46], LAMP), glow: true });
-  return parts;
+  const beam: Part[] = [bone(torch.hand, torch.tip, 0.4, TORCH), { ...part(torch.tip, [0.46, 0.46, 0.46], LAMP), glow: true }];
+  return [
+    ...turnedAbout(eldest, [...child(eldest, phase, [null, hand]), ...lantern], turn),
+    ...turnedAbout(middle, [...child(middle, phase + middle.lag, [reachFor(middle, eldest, [sleeve[0] - 0.4, sleeve[1] + 0.6, sleeve[2] - 1.2]), torch.hand]), ...beam], turn),
+    ...turnedAbout(youngest, child(youngest, phase + youngest.lag, [reachFor(youngest, middle, [elbow[0] - 0.2, elbow[1] + 0.6, elbow[2] - 1.8]), null]), turn),
+  ];
 }
 
-// Turned by an angle about the up axis: east as they walk, toward the south for a positive turn and the north for a negative one.
-export function paintKids(px: number, stride: number, strides: number, turn = 0): Figure {
-  const parts = kids(stride, strides);
-  if (!turn) return render(parts, px, 19, 15, 33);
-  const r = yaw(turn);
-  return render(
-    parts.map((q) => ({ ...q, c: turned(r, q.c), m: times(r, q.m) })),
-    px,
-    19,
-    18,
-    36,
-  );
-}
-const spun = (v: V, turn: number): V => (turn ? turned(yaw(turn), v) : v);
+// Each turned by an angle about the up axis where they stand: east as they walk, toward the south for a positive turn and the
+// north for a negative one.
+export const paintKids = (px: number, stride: number, strides: number, turn = 0): Figure =>
+  turn ? render(kids(stride, strides, turn), px, 19, 18, 36) : render(kids(stride, strides), px, 19, 15, 33);
 
 // The torch's lens from the children's feet, in pixels, for its beam.
 export function kidsTorch(px: number, turn = 0) {
-  const [x, y, z] = spun(kidsTorch3(0.3 * (CHILDREN[1].tall / 15)).tip, turn);
+  const [x, y, z] = about(CHILDREN[1], kidsTorch3(0.3 * (CHILDREN[1].tall / 15)).tip, turn);
   return { x: (x - y) * px, y: ((x + y) / 2 - z) * px };
 }
 
 // The lantern's place from the children's feet, in pixels, for its glow.
 export function kidsLantern(px: number, turn = 0) {
-  const [x, y, z] = spun(kidsLantern3(0.3 * (CHILDREN[0].tall / 15)).lamp, turn);
+  const [x, y, z] = about(CHILDREN[0], kidsLantern3(0.3 * (CHILDREN[0].tall / 15)).lamp, turn);
   return { x: (x - y) * px, y: ((x + y) / 2 - z) * px };
 }
 
