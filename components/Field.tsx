@@ -327,6 +327,56 @@ function signalOf(coin: string) {
   return made;
 }
 
+// Ectoplasm round the rim of the view: two sheets of glowing teal noise laid on the ground plane at a height, drifting across the map
+// against each other, kept out at the rim and added over the dusk, so the edges brighten and tint instead of greying. Each sheet tiles
+// every `scale` tiles; the glow starts ECTO_FROM out from the middle of the view (0 the middle, about 0.7 the corners) and comes in
+// over ECTO_IN.
+const ECTO_TEX = 256;
+const ECTO_FROM = 0.43;
+const ECTO_IN = 0.24;
+const ECTO = [
+  { streaky: true, rgb: [70, 232, 214], alpha: 0.26, scale: 8, drift: [-0.3, 0.12], z: 0.6 },
+  { streaky: false, rgb: [56, 186, 171], alpha: 0.21, scale: 6, drift: [0.2, -0.1], z: 0.2 },
+] as const;
+const smooth01 = (u: number) => {
+  const c = clamp(u, 0, 1);
+  return c * c * (3 - 2 * c);
+};
+// A tiling sheet of noise in a colour, its strength the alpha: `px` cells a repeat across and `py` down, streaky where they differ.
+function ectoNoise(px: number, py: number, octaves: number, floor: number, gain: number, rgb: readonly number[]) {
+  const c = document.createElement("canvas");
+  c.width = c.height = ECTO_TEX;
+  const g = c.getContext("2d")!;
+  const img = g.createImageData(ECTO_TEX, ECTO_TEX);
+  const cell = (x: number, y: number, p: number, q: number, o: number) => hash((((x % p) + p) % p) * 57.3 + (((y % q) + q) % q) * 131.7 + o * 17.1);
+  const noise = (u: number, v: number, p: number, q: number, o: number) => {
+    const xi = Math.floor(u);
+    const yi = Math.floor(v);
+    const sx = smooth01(u - xi);
+    const sy = smooth01(v - yi);
+    return lerp(lerp(cell(xi, yi, p, q, o), cell(xi + 1, yi, p, q, o), sx), lerp(cell(xi, yi + 1, p, q, o), cell(xi + 1, yi + 1, p, q, o), sx), sy);
+  };
+  for (let y = 0; y < ECTO_TEX; y++) {
+    for (let x = 0; x < ECTO_TEX; x++) {
+      let n = 0;
+      let amp = 0.5;
+      let sum = 0;
+      for (let o = 0; o < octaves; o++) {
+        n += noise((x / ECTO_TEX) * (px << o), (y / ECTO_TEX) * (py << o), px << o, py << o, o) * amp;
+        sum += amp;
+        amp *= 0.5;
+      }
+      img.data.set([rgb[0], rgb[1], rgb[2], Math.round(smooth01((n / sum - floor) * gain) * 255)], (y * ECTO_TEX + x) * 4);
+    }
+  }
+  g.putImageData(img, 0, 0);
+  return c;
+}
+// Made once, between frames, the first time it's wanted; it comes in over a second from when it's ready.
+let ectoSheets: HTMLCanvasElement[] | null = null;
+let ectoAsked = false;
+let ectoBorn = 0;
+
 // A lightning bolt in the field's own space, from a point in the sky to one on the ground, positions in tiles with z up: it wanders
 // and forks every way in three dimensions, so its spindles reach out toward and away from the viewer as well as across, and where it
 // lands, sparks crawl off along the ground. Seen through the field's view by see.
@@ -1028,8 +1078,8 @@ export function Field(props: Props) {
   const painting = useRef<{ c: HTMLCanvasElement; x0: number; y0: number; w: number; h: number; img: ImageData; row: number } | null>(null);
   const tracks = useRef<{ key: string; from: number; ts: number[]; ws: number[] } | null>(null);
   const tiles = useRef(new Map<string, Tile>());
-  // The far ground fading into the sky along the top, painted once for the canvas's size.
-  const distance = useRef<HTMLCanvasElement | null>(null);
+  // The ectoplasm's scratch canvas, the rim it's kept to and its sheets' patterns, made for the canvas's size.
+  const ecto = useRef<{ key: string; buf: HTMLCanvasElement; mask: HTMLCanvasElement; patterns: CanvasPattern[] } | null>(null);
   const book = useRef<{ walls: Props["walls"] | null; usual: number; lines: { p: number; side: Side; orders: number[] }[] }>({ walls: null, usual: 1, lines: [] });
   const decor = useRef<{ key: string; groves: Grove[]; low: Deco[] }>({ key: "", groves: [], low: [] });
   // The grass darkened by the rain, kept for the sheet and how wet it is.
@@ -2038,46 +2088,6 @@ export function Field(props: Props) {
     if (yf !== null) drawClouds(cloudX, yf, 1);
     for (const f of fading) drawCloud(f.x, f.y, f.alpha, f.size);
 
-    // Further into the future the haze thickens until the land is lost in it, and the far ground fades into the sky along the top.
-    const fogFrom = S(F, 0);
-    const fog = ctx.createLinearGradient(fogFrom.x, fogFrom.y, fogFrom.x + 4 * A, fogFrom.y + 8 * A);
-    fog.addColorStop(0, css(CLAY.haze, 0));
-    fog.addColorStop(1, css(CLAY.haze, 0.7));
-    poly(ctx, [S(F, ext.y0), S(ext.x1 + 1, ext.y0), S(ext.x1 + 1, ext.y1), S(F, ext.y1)], undefined);
-    ctx.fillStyle = fog;
-    ctx.fill();
-    let far = distance.current;
-    if (!far || far.width !== c.width || far.height !== Math.ceil(c.height * 0.32)) {
-      far = distance.current = document.createElement("canvas");
-      far.width = c.width;
-      far.height = Math.ceil(c.height * 0.32);
-      const gf = far.getContext("2d")!;
-      const fade = gf.createLinearGradient(0, 0, 0, far.height);
-      fade.addColorStop(0, css(CLAY.haze, 0.38));
-      fade.addColorStop(1, css(CLAY.haze, 0));
-      gf.fillStyle = fade;
-      gf.fillRect(0, 0, far.width, far.height);
-    }
-    ctx.drawImage(far, 0, 0, v.w, far.height / dpr);
-
-    // Low mist drifting over the grass at dusk, and once the storm builds, the shadows of its clouds passing over.
-    if (!reduced()) {
-      const t = at / 1000;
-      for (let n = 0; n < 5; n++) {
-        const span = v.w + 900;
-        const cx = ((((t * (9 + n * 3) + hash(n) * span) % span) + span) % span) - 450;
-        const cy = v.h * (0.25 + hash(n * 5.3) * 0.65);
-        const r = v.w * (0.22 + hash(n * 2.1) * 0.18);
-        for (const [alpha, color] of [
-          [0.1 * (1 - wet), CLAY.haze],
-          [0.22 * wet, [34, 42, 66] as RGB],
-        ] as const) {
-          if (alpha < 0.05 || cx + r < 0 || cx - r > v.w) continue;
-          blob(ctx, cx, cy, r, r * 0.38, color, alpha);
-        }
-      }
-    }
-
     // Rain, heavier round by round: a drop falling slantwise in each patch of the view, and a splash where it lands.
     if (wet > 0.04) {
       // On a phone the drops fall a little further apart: the same rain, fewer strokes.
@@ -2202,6 +2212,55 @@ export function Field(props: Props) {
       ctx.globalCompositeOperation = "lighter";
     }
     for (const glow of [...glows, ...flashes]) if (glow.a >= 0.05) shine(ctx, glow.p.x, glow.p.y, glow.r, glow.r, glow.rgb, glow.a, true);
+    // The ectoplasm (ECTO): each sheet laid in a half-size scratch canvas on the ground plane, lifted to its height, moving with the
+    // ground and drifting over it, kept to the rim, then added on.
+    if (!ectoSheets && !ectoAsked) {
+      ectoAsked = true;
+      idle(() => {
+        ectoSheets = ECTO.map((sheet) => (sheet.streaky ? ectoNoise(2, 9, 4, 0.4, 2.6, sheet.rgb) : ectoNoise(4, 4, 5, 0.32, 2.2, sheet.rgb)));
+        ectoBorn = performance.now();
+      });
+    }
+    if (ectoSheets) {
+      const lw = Math.ceil(v.w / 2);
+      const lh = Math.ceil(v.h / 2);
+      let mist = ecto.current;
+      if (!mist || mist.key !== `${lw}x${lh}`) {
+        const buf = document.createElement("canvas");
+        buf.width = lw;
+        buf.height = lh;
+        const mask = document.createElement("canvas");
+        mask.width = lw;
+        mask.height = lh;
+        const mg = mask.getContext("2d")!;
+        const rim = mg.createImageData(lw, lh);
+        for (let y = 0; y < lh; y++) {
+          for (let x = 0; x < lw; x++) rim.data[(y * lw + x) * 4 + 3] = Math.round(smooth01((Math.hypot((x / lw - 0.5) * 1.15, (y / lh - 0.52) * 1.3) - ECTO_FROM) / ECTO_IN) * 255);
+        }
+        mg.putImageData(rim, 0, 0);
+        const bg = buf.getContext("2d")!;
+        mist = ecto.current = { key: `${lw}x${lh}`, buf, mask, patterns: ectoSheets.map((sheet) => bg.createPattern(sheet, "repeat")!) };
+      }
+      const bg = mist.buf.getContext("2d")!;
+      const t = reduced() ? 0 : at / 1000;
+      const born = clamp((performance.now() - ectoBorn) / 1000, 0, 1);
+      ECTO.forEach((sheet, n) => {
+        // the sheet's place on the ground, kept within one repeat so the numbers stay small
+        const across = (((nowX - sheet.drift[0] * t) % sheet.scale) + sheet.scale) % sheet.scale;
+        const down = (((g.cy - R / 2 - sheet.drift[1] * t) % sheet.scale) + sheet.scale) % sheet.scale;
+        const u = (A * sheet.scale) / ECTO_TEX / 2;
+        mist.patterns[n].setTransform(new DOMMatrix([u, u / 2, -u, u / 2, (v.OX - A * (across - down)) / 2, (v.OY - sheet.z * A - (A / 2) * (across + down)) / 2]));
+        bg.globalCompositeOperation = "source-over";
+        bg.clearRect(0, 0, lw, lh);
+        bg.fillStyle = mist.patterns[n];
+        bg.fillRect(0, 0, lw, lh);
+        bg.globalCompositeOperation = "destination-in";
+        bg.drawImage(mist.mask, 0, 0);
+        ctx.globalAlpha = sheet.alpha * born;
+        ctx.drawImage(mist.buf, 0, 0, v.w, v.h);
+      });
+      ctx.globalAlpha = 1;
+    }
     ctx.globalCompositeOperation = "source-over";
     bolts.forEach((fn) => fn());
 
