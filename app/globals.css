@@ -821,6 +821,7 @@ h2 {
 .plain {
   background: var(--raised);
   border: 2px solid var(--edge);
+  color: var(--text);
 }
 
 
@@ -1974,19 +1975,19 @@ h2 {
   cursor: pointer;
 }
 
-.account .row {
+.linked .row {
   display: flex;
   align-items: baseline;
   gap: 10px;
   margin-bottom: 6px;
 }
 
-.account .row b {
+.linked .row b {
   color: var(--text);
   font: 600 16px var(--mono), monospace;
 }
 
-.account .money {
+.linked .money {
   font-size: 22px !important;
 }
 

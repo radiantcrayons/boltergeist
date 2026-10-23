@@ -64,7 +64,7 @@ export function Connect({ session, balance, onSession, onClose }: Props) {
         <p className={`network ${NETWORK}`}>{NETWORK === "testnet" ? "Strike testnet: test money only" : "Strike mainnet: real money"}</p>
 
         {session ? (
-          <div className="account">
+          <div className="linked">
             <div className="row">
               <span className="dim">connected</span>
               <b>{session.address ? short(session.address) : short(session.accountId)}</b>
