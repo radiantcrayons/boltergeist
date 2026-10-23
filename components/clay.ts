@@ -11,6 +11,7 @@ export type Figure = { canvas: HTMLCanvasElement; ox: number; oy: number; w: num
 
 const LIGHT: V = norm([-0.151, 0.557, 0.668]);
 const LAMP: RGB = [250, 214, 120];
+const BOLT: RGB = [255, 222, 74];
 
 function norm(v: V): V {
   const l = Math.hypot(v[0], v[1], v[2]) || 1;
@@ -363,9 +364,9 @@ function dragon(body: RGB, phase: number, boo: boolean): Part[] {
   parts.push(lump(4.3, 0, boo ? 9.6 : 9.9, [0.9, 1.9, boo ? 1.15 : 0.6], INK));
   parts.push(lump(4.5, 0.4, boo ? 9.1 : 9.6, [0.5, 0.9, 0.35], TONGUE));
   for (const t of [-1.1, 1.1]) parts.push(lump(4.95, t, 10.5, [0.25, 0.3, 0.38], TEETH));
-  // The bolt, held up in the raised fist like a club and glowing in the ghost's own colour.
+  // The bolt, held up in the raised fist like a club and glowing lightning yellow whatever the ghost's colour.
   const up = (along: number, off: number): V => add(grip, spot(0, off, along));
-  parts.push(...chain([up(-1.4, 0.1), up(1.4, 0.9), up(2.2, -0.2), up(5.2, 1)], boo ? 0.5 : 0.42, boo ? 0.5 : 0.42, tone(body, 1.15), true));
+  parts.push(...chain([up(-1.4, 0.1), up(1.4, 0.9), up(2.2, -0.2), up(5.2, 1)], boo ? 0.5 : 0.42, boo ? 0.5 : 0.42, BOLT, true));
   return parts.map((p) => ({ ...p, c: [p.c[0], p.c[1], p.c[2] + 1.6] as V }));
 }
 

@@ -270,8 +270,10 @@ function wordOf(text: string, font: string, color: string, scale: number) {
   });
 }
 
-// Each market's mark, cut out of a disc of warm light: the coin's own silhouette where there is one, its letters where there isn't.
+// Each market's mark, cut cleanly out of a soft pool of warm light: solid in the middle, where the mark sits, and feathering out to
+// nothing at the rim. The coin's own symbol where there is one, its letters where there isn't.
 const SIGNAL = 256;
+const SOLID = 0.6;
 const COINS = new Set(["ada", "bnb", "btc", "doge", "eth", "sol", "xrp", "zec"]);
 const signals = new Map<string, HTMLCanvasElement>();
 function signalOf(coin: string) {
@@ -280,30 +282,42 @@ function signalOf(coin: string) {
   const c = document.createElement("canvas");
   c.width = c.height = SIGNAL;
   const g = c.getContext("2d")!;
-  const tint = () => {
-    g.globalCompositeOperation = "source-in";
-    g.fillStyle = "rgb(255, 206, 140)";
-    g.fillRect(0, 0, SIGNAL, SIGNAL);
+  const r = SIGNAL / 2;
+  const pool = () => {
     g.globalCompositeOperation = "source-over";
+    g.clearRect(0, 0, SIGNAL, SIGNAL);
+    const light = g.createRadialGradient(r, r, 0, r, r, r);
+    light.addColorStop(0, "rgba(255, 214, 150, 1)");
+    light.addColorStop(SOLID, "rgba(255, 206, 140, 1)");
+    light.addColorStop(SOLID + (1 - SOLID) * 0.45, "rgba(255, 206, 140, 0.45)");
+    light.addColorStop(1, "rgba(255, 206, 140, 0)");
+    g.fillStyle = light;
+    g.fillRect(0, 0, SIGNAL, SIGNAL);
+    g.globalCompositeOperation = "destination-out";
   };
-  g.fillStyle = "#fff";
-  g.beginPath();
-  g.arc(SIGNAL / 2, SIGNAL / 2, SIGNAL / 2, 0, Math.PI * 2);
-  g.fill();
-  g.globalCompositeOperation = "destination-out";
-  g.font = `${SIGNAL * (coin.length > 4 ? 0.2 : coin.length > 3 ? 0.27 : 0.34)}px ${DISPLAY}`;
+  pool();
+  g.font = `${SIGNAL * SOLID * (coin.length > 4 ? 0.3 : coin.length > 3 ? 0.4 : 0.5)}px ${DISPLAY}`;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(coin, SIGNAL / 2, SIGNAL / 2 + SIGNAL * 0.02);
+  g.fillText(coin, r, r + SIGNAL * 0.02);
   g.globalCompositeOperation = "source-over";
-  tint();
   signals.set(coin, c);
   if (!COINS.has(coin.toLowerCase())) return c;
   const img = new Image();
   img.onload = () => {
-    g.clearRect(0, 0, SIGNAL, SIGNAL);
-    g.drawImage(img, 0, 0, SIGNAL, SIGNAL);
-    tint();
+    // The symbol alone: a whole coin with the coin's picture taken away leaves just the holes the symbol makes in it.
+    const m = document.createElement("canvas");
+    m.width = m.height = SIGNAL;
+    const mg = m.getContext("2d")!;
+    mg.beginPath();
+    mg.arc(r, r, r - 1, 0, Math.PI * 2);
+    mg.fill();
+    mg.globalCompositeOperation = "destination-out";
+    mg.drawImage(img, 0, 0, SIGNAL, SIGNAL);
+    pool();
+    const s = SIGNAL * SOLID * 0.98;
+    g.drawImage(m, r - s / 2, r - s / 2, s, s);
+    g.globalCompositeOperation = "source-over";
   };
   img.src = `/coins/${coin.toLowerCase()}.svg`;
   return c;
@@ -1802,7 +1816,7 @@ export function Field(props: Props) {
     const still = reduced() || moved < dt * 0.00005;
     const strideNow = reduced() ? 0 : Math.floor(((gait.walked / 0.5) % 1) * STRIDES);
     const tremble = still && !reduced() ? Math.sin(at / 37) * 0.5 : 0;
-    // They walk a step behind the price, the ring round it on the ground ahead of them where the middle one's torch shines.
+    // They walk a step behind the price, its pool of light on the ground ahead of them where the middle one's torch shines.
     shadows.push(() => {
       const p = S(kx, y0);
       blob(ctx, p.x, p.y, 0.8 * A, 0.36 * A, [92, 108, 136], 0.55 * sun);
@@ -1826,10 +1840,6 @@ export function Field(props: Props) {
     sun = glare.length ? 0.2 : 1;
     ctx.globalCompositeOperation = "multiply";
     shadows.forEach((fn) => fn());
-    ctx.globalCompositeOperation = "source-over";
-    const ring = S(0, y0);
-    oval(ctx, ring.x, ring.y, 22 * k, 11 * k, undefined, COLORS.volt, 2);
-    ctx.globalCompositeOperation = "multiply";
     // Each one's own silhouette, laid flat on the ground away from the strike: its height runs off along the ground, longer the
     // nearer the strike, and its width lies across, kept the way round it's drawn.
     for (const c of casters) {
@@ -1970,13 +1980,13 @@ export function Field(props: Props) {
     }
     const lamp = S(0, y0);
     shine(ctx, lamp.x, lamp.y, 2.6 * A, 1.3 * A, "255, 186, 104", 0.3, false);
-    // The coin, like a signal in the sky: a disc of lantern light on the ground under the kids with the market's mark cut out of it.
+    // The coin, like a signal in the sky: a soft pool of lantern light on the ground under the kids with the market's mark cut out of it.
     const mark0 = coin ? signalOf(coin) : null;
     if (mark0) {
       const f = (A * 1.8) / SIGNAL;
       ctx.save();
       ctx.setTransform(dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2, dpr * lamp.x, dpr * lamp.y);
-      ctx.globalAlpha = 0.34;
+      ctx.globalAlpha = 0.5;
       ctx.drawImage(mark0, -SIGNAL / 2, -SIGNAL / 2);
       ctx.restore();
       ctx.globalCompositeOperation = "lighter";
