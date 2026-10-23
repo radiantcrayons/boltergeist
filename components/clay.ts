@@ -210,8 +210,34 @@ const TONGUE: RGB = [226, 92, 104];
 
 export type GhostKind = "wisp" | "spectre" | "poltergeist";
 
-// The wisp: a round little head running down into a curl of flame, two big eyes, nubs for arms.
-function wisp(body: RGB, phase: number, boo: boolean): Part[] {
+// Every ghost is clay of one colour, its body, with only its eyes, mouth and dark details fixed, so one model makes a ghost of any hue.
+const tone = (c: RGB, k: number): RGB => lit(c, k);
+const add = (v: V, d: V): V => [v[0] + d[0], v[1] + d[1], v[2] + d[2]];
+function chain(pts: V[], w0: number, w1: number, color: RGB, glow = false): Part[] {
+  const out: Part[] = [];
+  for (let i = 0; i < pts.length - 1; i++) out.push({ ...bone(pts[i], pts[i + 1], w0 + (w1 - w0) * (i / Math.max(1, pts.length - 2)), color), glow });
+  return out;
+}
+function drip(top: V, len: number, w: number, color: RGB): Part[] {
+  const end = nudge(top, 0, 0, -len);
+  return [bone(top, end, w, color), part(nudge(end, 0, 0, -w * 0.4), [w * 1.35, w * 1.35, w * 1.55], color)];
+}
+// A head as an ellipsoid facing the viewer, and where its front surface is at a given across and up.
+type Head = { f: number; s: number; z: number; rf: number; rs: number; rz: number };
+const surface = (h: Head, s: number, z: number, inset = 0) => h.f + h.rf * Math.sqrt(Math.max(0, 1 - ((s - h.s) / h.rs) ** 2 - ((z - h.z) / h.rz) ** 2)) - inset;
+function eye(h: Head, s: number, z: number, k = 1): Part[] {
+  const f = surface(h, s, z, 0.7 * k);
+  return [lump(f, s, z, [0.75 * k, 1.1 * k, 1.35 * k], INK), lump(f + 0.62 * k, s - 0.4 * k, z + 0.5 * k, [0.3 * k, 0.38 * k, 0.4 * k], SHINE), lump(f + 0.55 * k, s + 0.35 * k, z - 0.55 * k, [0.15 * k, 0.18 * k, 0.18 * k], SHINE)];
+}
+const stroke = (h: Head, pts: [number, number][], w: number, color: RGB) => chain(pts.map(([s, z]) => spot(surface(h, s, z) + 0.15 - w * 0.4, s, z)), w, w, color);
+function outward(a: number): number[] {
+  const n = spot(Math.cos(a), Math.sin(a), 0);
+  const t = spot(-Math.sin(a), Math.cos(a), 0);
+  return [n[0], t[0], 0, n[1], t[1], 0, 0, 0, 1];
+}
+
+// The slime: a round head over a curling tail, big shining eyes, blush, a little smile and a drip.
+function slime(body: RGB, phase: number, boo: boolean): Part[] {
   const parts: Part[] = [];
   const flare = boo ? 1.3 : 1;
   const tail: [number, number, number, number][] = [
@@ -224,22 +250,27 @@ function wisp(body: RGB, phase: number, boo: boolean): Part[] {
   ];
   const curl = tail.map(([f, s, z], i) => spot(f + Math.cos(phase - i * 0.9) * 0.2 * i, s + Math.sin(phase - i * 0.9) * 0.3 * i * flare, z + (boo ? i * 0.45 : 0)));
   for (let i = 0; i < curl.length - 1; i++) parts.push(bone(curl[i], curl[i + 1], tail[i][3] * (i ? flare : 1), body));
-  parts.push(lump(0, 0, 11.2, [3.9, 4.1, 3.9], body));
-  const tuft = spot(-0.9, 1.3 + Math.sin(phase) * 0.4, boo ? 17.2 : 16.3);
-  parts.push(bone(spot(-0.5, 0.3, 14.3), tuft, boo ? 1.05 : 0.85, body));
-  if (boo) parts.push(bone(spot(-0.5, -0.4, 14.3), spot(-0.8, -1.6 - Math.sin(phase) * 0.4, 16.3), 0.8, body));
+  const head: Head = { f: 0, s: 0, z: 11.2, rf: 3.9, rs: 4.1, rz: 3.9 };
+  parts.push(lump(head.f, head.s, head.z, [head.rf, head.rs, head.rz], body));
+  parts.push(bone(spot(-0.5, 0.3, 14.3), spot(-0.9, 1.3 + Math.sin(phase) * 0.4, boo ? 17.2 : 16.3), boo ? 1.05 : 0.85, body));
   for (const s of [-1, 1]) {
     parts.push(lump(0.8, s * 4.1, boo ? 11.8 : 9.4 + Math.sin(phase + s) * 0.3, [0.9, 0.95, 0.8], body));
     parts.push(lump(3.15, s * 2.75, 10, [0.5, 0.75, 0.42], BLUSH));
-    parts.push(lump(3.2, s * 1.55, 11.4, [0.75, 1.1, 1.35], INK));
-    parts.push(lump(3.85, s * 1.55 - 0.4, 11.9, [0.3, 0.38, 0.4], SHINE));
+    parts.push(...eye(head, s * 1.55, 11.4, 1.05));
   }
-  parts.push(boo ? lump(2.9, 0, 9.1, [0.8, 1, 1.25], INK) : lump(3.3, 0, 9.4, [0.4, 0.55, 0.45], INK));
+  const smile: [number, number][] = [
+    [-0.5, 9.5],
+    [0, 9.2],
+    [0.5, 9.5],
+  ];
+  parts.push(...(boo ? [lump(2.9, 0, 9.1, [0.8, 1, 1.25], INK)] : stroke(head, smile, 0.17, INK)));
+  parts.push(...drip(spot(1.2, -2.6, 8.2), 1.2 + Math.sin(phase) * 0.2, 0.32, body));
   return parts;
 }
 
-// The spectre: tall and hooded, two embers for eyes in the dark of the hood, long sleeves reaching out and a ragged hem.
-function spectre(body: RGB, phase: number, boo: boolean): Part[] {
+// The spectre: a hooded reaper, two embers for eyes in the dark of the hood, both hands on a scythe taller than itself whose blade
+// glows along its edge. All of it, scythe too, is the ghost's own colour.
+function reaper(body: RGB, phase: number, boo: boolean): Part[] {
   const parts: Part[] = [];
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2 + 0.15;
@@ -249,64 +280,79 @@ function spectre(body: RGB, phase: number, boo: boolean): Part[] {
     const mid = nudge(top, Math.cos(a) * 0.5 - sway * 0.25, Math.sin(a) * 0.6 + sway * 0.2, -len * 0.7);
     parts.push(bone(top, mid, 1, body), bone(mid, nudge(mid, Math.cos(a) * 0.3 - sway * 0.35, Math.sin(a) * 0.3 + sway * 0.2, -len * 0.6), 0.45, body));
   }
-  parts.push(lump(-0.4, 0, 4.6, [3.2, 3.9, 2.6], body));
-  parts.push(lump(-0.3, 0, 7.4, [2.8, 3.4, 4.6], body));
-  parts.push(lump(-0.1, 0, 10.6, [2.3, 3.3, 1.7], body));
-  parts.push(lump(0, 0, 13.3, [3, 2.9, 2.8], body));
+  parts.push(lump(-0.4, 0, 4.6, [3.2, 3.9, 2.6], body), lump(-0.3, 0, 7.4, [2.8, 3.4, 4.6], body), lump(-0.1, 0, 10.6, [2.3, 3.3, 1.7], body), lump(0, 0, 13.3, [3, 2.9, 2.8], body));
   parts.push(bone(spot(-0.4, 0, 15), spot(-2, 0.3 + Math.sin(phase) * 0.2, 17.1), 1, body));
   parts.push(lump(1.6, 0, 13, [1.6, 1.8, 2.2], HOLLOW));
   for (const s of [-1, 1]) {
-    parts.push(bone(spot(2.1, s * 1.95, 11), spot(2.4, s * 1.55, 14.2), 0.55, body));
-    parts.push(bone(spot(2.4, s * 1.55, 14.2), spot(2.55, 0, 15.4), 0.55, body));
+    parts.push(bone(spot(2.1, s * 1.95, 11), spot(2.4, s * 1.55, 14.2), 0.55, body), bone(spot(2.4, s * 1.55, 14.2), spot(2.55, 0, 15.4), 0.55, body));
     parts.push(lump(2.85, s * 0.72, 13.2, boo ? [0.5, 0.55, 0.75] : [0.4, 0.42, 0.58], EMBER, true));
+    // Both hands on the shaft: the right up high, the left crossing over to hold it lower down.
+    const cuff = s > 0 ? spot(2.4, 4.8, boo ? 13.4 : 12.6) : spot(2.6, 4.6, 9.2);
     const shoulder = spot(0.2, s * 3, 10.8);
-    const cuff = boo ? spot(2.2, s * 5.6, 14.6) : spot(3.6, s * 4.6, 11 + Math.sin(phase + s) * 0.3);
     const sway = Math.sin(phase + s * 1.3) * 0.4;
-    const hang = nudge(cuff, -0.2 - sway * 0.5, s * 0.2, -2.4);
-    parts.push(bone(shoulder, cuff, 0.95, body), bone(cuff, hang, 1.1, body), bone(hang, nudge(hang, -sway, 0, -1.8), 0.5, body));
+    const drape = spot(-0.2 - sway * 0.5, s * 0.2, -2.4 * (s > 0 ? 0.5 : 0.4));
+    const hang = add(cuff, drape);
+    const back = spot(sway, 0, 0);
+    parts.push(bone(shoulder, cuff, 0.95, body), bone(cuff, hang, 1.1, body), bone(hang, [hang[0] + drape[0] * 0.7 - back[0], hang[1] + drape[1] * 0.7 - back[1], hang[2] + drape[2] * 0.75], 0.5, body));
     const reach = norm([cuff[0] - shoulder[0], cuff[1] - shoulder[1], cuff[2] - shoulder[2]]);
-    parts.push(part([cuff[0] + reach[0] * 0.5, cuff[1] + reach[1] * 0.5, cuff[2] + reach[2] * 0.5], [0.62, 0.62, 0.25], HOLLOW, toward(reach)));
+    parts.push(part(add(cuff, [reach[0] * 0.5, reach[1] * 0.5, reach[2] * 0.5]), [0.62, 0.62, 0.25], HOLLOW, toward(reach)));
   }
+  const lift = boo ? 0.8 : 0;
+  const foot = spot(2.8, 5.2, 0.4 + lift);
+  const crown = spot(2.2, 5.7, 21 + lift);
+  const blade = [spot(2.3, 5.5, 21.3), spot(2.7, 3.8, 21.8), spot(3, 1.5, 21.4), spot(2.8, -0.6, 20.2), spot(2.4, -2.1, 18.6)].map((p) => nudge(p, 0, 0, lift));
+  const edge = blade.map((p, i) => nudge(p, 0.05, 0, -0.55 + i * 0.05));
+  parts.push(bone(foot, crown, 0.36, tone(body, 0.62)), ...chain(blade, 0.55, 0.2, tone(body, 0.82)), ...chain(edge.slice(1), 0.16, 0.12, tone(body, 1.2), true));
   if (boo) parts.push(lump(2.7, 0, 11.9, [0.4, 0.5, 0.55], EMBER, true));
   return parts;
 }
 
-// The boltergeist: Strike's mint dragon come back as a ghost. A big round head with a snout pushed forward, wide eyes under heavy
-// brows, black horns and a crest of spikes down its back, little clawed fists, a ghost's sheet trailing away beneath, and a bolt of
-// lightning circling it.
-const DRAGON: RGB = [112, 232, 186];
-const DEEP: RGB = [16, 116, 90];
+// The boltergeist: Strike's dragon come back as a ghost. A big round head with a snout pushed forward, wide eyes under heavy brows,
+// black horns and a crest of spikes down its back, little wings beating, one fist raised with a bolt of lightning in it, and a ring of
+// clay trailing away beneath.
 const HORN: RGB = [34, 40, 50];
-function boltergeist(body: RGB, phase: number, boo: boolean): Part[] {
+function dragon(body: RGB, phase: number, boo: boolean): Part[] {
   const parts: Part[] = [];
-  let grip: V = [0, 0, 0];
-  const skin: RGB = [body[0] * 0.45 + DRAGON[0] * 0.55, body[1] * 0.45 + DRAGON[1] * 0.55, body[2] * 0.45 + DRAGON[2] * 0.55];
-  const belly: RGB = lit(skin, 1.12, 1);
-  const crest: RGB = [skin[0] * 0.62, skin[1] * 0.78, skin[2] * 0.72];
+  const skin = body;
+  const belly = tone(skin, 1.12);
+  const crest = tone(skin, 0.72);
+  const iris = tone(skin, 0.42);
   for (let i = 0; i < 8; i++) {
     const a = ((i + phase / (Math.PI * 2)) / 8) * Math.PI * 2;
     parts.push(lump(Math.cos(a) * 3.4, Math.sin(a) * 4.2, 2.8 + Math.sin(phase + i * 2.4) * 0.5, [1.5, 1.5, 1.5], skin));
   }
   parts.push(bone(spot(-1.2, 0, 3.2), spot(-3.6, 1.4 + Math.sin(phase) * 0.6, 1.2), 1.1, skin));
-  parts.push(lump(0, 0, 6.8, [3.9, 4.7, 4.3], skin));
-  parts.push(lump(2.3, 0, 6.6, [1.8, 3, 3.3], belly));
-  parts.push(lump(0.4, 0, 12, [3.9, 4.4, 3.7], skin));
-  parts.push(lump(3.4, 0, 11.1, [2.7, 2.7, 2], skin));
+  parts.push(lump(0, 0, 6.8, [3.9, 4.7, 4.3], skin), lump(2.3, 0, 6.6, [1.8, 3, 3.3], belly));
+  parts.push(lump(0.4, 0, 12, [3.9, 4.4, 3.7], skin), lump(3.4, 0, 11.1, [2.7, 2.7, 2], skin));
+  let grip: V = [0, 0, 0];
+  const flap = Math.sin(phase) * 1.2;
   for (const s of [-1, 1]) {
     parts.push(lump(5.75, s * 0.85, 11.9, [0.3, 0.35, 0.3], INK));
     parts.push(lump(2.75, s * 1.95, 13.5, [0.95, 1.15, 1.4], SHINE));
-    parts.push(lump(3.45, s * 1.85, 13.3, [0.5, 0.68, 0.85], DEEP));
+    parts.push(lump(3.45, s * 1.85, 13.3, [0.5, 0.68, 0.85], iris));
     parts.push(lump(3.85, s * 1.8, 13.4, [0.26, 0.34, 0.5], INK));
     parts.push(lump(4.05, s * 1.65, 13.85, [0.14, 0.14, 0.14], SHINE));
     parts.push(bone(spot(3.1, s * 0.7, 14.9), spot(2.4, s * 3.1, 15.6 - (boo ? 0.5 : 0)), 0.55, HORN));
-    parts.push(bone(spot(-0.4, s * 2.1, 15), spot(-1.5, s * 2.9, 17), 0.7, HORN));
-    parts.push(bone(spot(-1.5, s * 2.9, 17), spot(-2.2, s * 3, 17.8), 0.35, HORN));
+    parts.push(bone(spot(-0.4, s * 2.1, 15), spot(-1.5, s * 2.9, 17), 0.7, HORN), bone(spot(-1.5, s * 2.9, 17), spot(-2.2, s * 3, 17.8), 0.35, HORN));
     const shoulder = spot(0.6, s * 4.2, 8.6);
-    const fist = boo ? spot(2, s * 6.6, 13.4) : spot(1.8, s * 5.8, 10.6 + s * Math.sin(phase) * 0.5);
-    parts.push(bone(shoulder, fist, 1.05, skin));
-    parts.push(part(fist, [1.1, 1.1, 1.05], skin));
+    const fist = s > 0 ? spot(1.6, 6.2, boo ? 15.6 : 14.8) : boo ? spot(2, -6.6, 13.4) : spot(1.8, -5.8, 10.6 + Math.sin(phase) * 0.5);
+    parts.push(bone(shoulder, fist, 1.05, skin), part(fist, [1.1, 1.1, 1.05], skin));
     for (const c of [-0.45, 0.45]) parts.push(part(nudge(fist, 0.9, c * s, 0.35), [0.22, 0.22, 0.32], HORN));
     if (s > 0) grip = fist;
+    // A little wing off each shoulder blade: a bony arm with a membrane hung from it, beating.
+    const root = spot(-3, s * 1.6, 10.8);
+    const elbow = spot(-4.2, s * 5.2, 15.4 + flap);
+    const tip = spot(-3.8, s * 8.4, 12.6 + flap * 1.4);
+    parts.push(bone(root, elbow, 0.55, skin), bone(elbow, tip, 0.4, skin));
+    for (const [t, h] of [
+      [0.35, 2.4],
+      [0.65, 2.6],
+      [0.92, 1.8],
+    ]) {
+      const [from, to, u] = t < 0.5 ? [root, elbow, t * 2] : [elbow, tip, (t - 0.5) * 2];
+      const top: V = [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u, from[2] + (to[2] - from[2]) * u];
+      parts.push({ c: nudge(top, 0, 0, -h * 0.75), r: [0.18, 1.6, h], m: outward(0), color: tone(skin, 0.62) });
+    }
   }
   for (const [f, z, w] of [
     [-3.6, 14.4, 0.75],
@@ -317,17 +363,17 @@ function boltergeist(body: RGB, phase: number, boo: boolean): Part[] {
   parts.push(lump(4.3, 0, boo ? 9.6 : 9.9, [0.9, 1.9, boo ? 1.15 : 0.6], INK));
   parts.push(lump(4.5, 0.4, boo ? 9.1 : 9.6, [0.5, 0.9, 0.35], TONGUE));
   for (const t of [-1.1, 1.1]) parts.push(lump(4.95, t, 10.5, [0.25, 0.3, 0.38], TEETH));
-  // A bolt of lightning held up in its right fist like a club, glowing.
-  const zig: V[] = [nudge(grip, 0.2, 0.1, -1.4), nudge(grip, 0.1, 0.9, 1.4), nudge(grip, 0, -0.2, 2.2), nudge(grip, -0.1, 1, 5.2)];
-  for (let i = 0; i < zig.length - 1; i++) parts.push({ ...bone(zig[i], zig[i + 1], boo ? 0.5 : 0.42, EMBER), glow: true });
-  return parts;
+  // The bolt, held up in the raised fist like a club and glowing in the ghost's own colour.
+  const up = (along: number, off: number): V => add(grip, spot(0, off, along));
+  parts.push(...chain([up(-1.4, 0.1), up(1.4, 0.9), up(2.2, -0.2), up(5.2, 1)], boo ? 0.5 : 0.42, boo ? 0.5 : 0.42, tone(body, 1.15), true));
+  return parts.map((p) => ({ ...p, c: [p.c[0], p.c[1], p.c[2] + 1.6] as V }));
 }
 
-// Each kind, and the room its picture needs left of its middle and across.
-const SPOOKS: Record<GhostKind, [(body: RGB, phase: number, boo: boolean) => Part[], number, number]> = {
-  wisp: [wisp, 9, 22],
-  spectre: [spectre, 11, 22],
-  poltergeist: [boltergeist, 13, 30],
+// Each kind, and the room its picture needs: left of its middle, across, and above its feet.
+const SPOOKS: Record<GhostKind, [(body: RGB, phase: number, boo: boolean) => Part[], number, number, number]> = {
+  wisp: [slime, 9, 22, 19],
+  spectre: [reaper, 11, 22, 23],
+  poltergeist: [dragon, 13, 30, 24],
 };
 
 // How many ways round a ghost can be turned: enough for it to spin smoothly.
@@ -336,16 +382,16 @@ export const ANGLES = 32;
 // A ghost of a kind at px pixels to a unit: frame sets its sway, boo is it jumping out, and turn is how far round it has spun, in sixteenths.
 // Turned at all, it needs as much room on one side as the other.
 export function paintSpook(kind: GhostKind, body: RGB, px: number, frame: number, frames: number, boo = false, turn = 0): Figure {
-  const [make, left, wide] = SPOOKS[kind];
+  const [make, left, wide, top] = SPOOKS[kind];
   const parts = make(body, (frame / frames) * Math.PI * 2, boo);
   const a = ((turn % ANGLES) / ANGLES) * Math.PI * 2;
-  if (!a) return render(parts, px, 19, left, wide);
+  if (!a) return render(parts, px, top, left, wide);
   const r = yaw(a);
   const side = Math.max(left, wide - left);
   return render(
     parts.map((q) => ({ ...q, c: turned(r, q.c), m: times(r, q.m) })),
     px,
-    19,
+    top,
     side,
     side * 2,
   );

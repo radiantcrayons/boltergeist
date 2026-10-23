@@ -5,44 +5,48 @@ import type { Role } from "@/lib/game/war";
 import type { Mood } from "./art";
 import { ANGLES, paintSpook, type Figure, type GhostKind, type RGB } from "./clay";
 
-// Slime, Spectre and Boltergeist. Off the field each fills its frame like the boltergeist does; only the field shows their true sizes.
-const BODY: Record<Role, RGB> = { soldier: [214, 240, 228], commando: [222, 226, 246], warlord: [196, 246, 224] };
+// Slime, Spectre and Boltergeist, all in the game's mint. Off the field each fills its frame like the boltergeist does; only the field
+// shows their true sizes.
+const MINT: RGB = [124, 232, 192];
+const BODY: Record<Role, RGB> = { soldier: MINT, commando: MINT, warlord: MINT };
 export const GHOST_KIND: Record<Role, GhostKind> = { soldier: "wisp", commando: "spectre", warlord: "poltergeist" };
-// How far each sits right of its middle, in clay units: the wisp's tail and the boltergeist's bolt hang off to the right.
-const LEAN: Record<Role, number> = { soldier: 1, commando: 0, warlord: 1.5 };
-// How far out from its middle each reaches as it turns, in clay units.
-const REACH: Record<Role, number> = { soldier: 13, commando: 11, warlord: 17 };
 const FRAMES = 8;
 const painted = new Map<string, Figure>();
 
-type Span = { up: number; reach: number; wide: number };
+type Span = { up: number; reach: number; wide: number; mid: number };
 const spans = new Map<Role, Span>();
 
-// How tall, how far out as it turns, and how wide face on each ghost is, in clay units, measured once from its own model.
+// How tall, how far out as it turns, how wide face on and how far its middle sits from its feet, in clay units, measured once from
+// its own model at rest and mid sway.
 function span(role: Role): Span {
   const known = spans.get(role);
   if (known) return known;
   const unit = 4;
-  const s: Span = { up: 0, reach: 0, wide: 0 };
-  for (let turn = 0; turn < ANGLES; turn += ANGLES / 8) {
-    const f = paintSpook(GHOST_KIND[role], BODY[role], unit, 0, FRAMES, false, turn);
-    const { width, height } = f.canvas;
-    const alpha = f.canvas.getContext("2d")?.getImageData(0, 0, width, height).data;
-    if (!alpha) continue;
-    let left = width;
-    let right = -1;
-    let top = height;
-    for (let y = 0; y < height; y++)
-      for (let x = 0; x < width; x++)
-        if (alpha[(y * width + x) * 4 + 3] > 24) {
-          left = Math.min(left, x);
-          right = Math.max(right, x);
-          top = Math.min(top, y);
-        }
-    if (right < 0) continue;
-    s.up = Math.max(s.up, (f.oy - top) / unit);
-    s.reach = Math.max(s.reach, Math.max(f.ox - left, right - f.ox) / unit);
-    if (turn === 0) s.wide = (right - left) / unit;
+  const s: Span = { up: 0, reach: 0, wide: 0, mid: 0 };
+  for (const frame of [0, FRAMES / 4]) {
+    for (let turn = 0; turn < ANGLES; turn += ANGLES / 8) {
+      const f = paintSpook(GHOST_KIND[role], BODY[role], unit, frame, FRAMES, false, turn);
+      const { width, height } = f.canvas;
+      const alpha = f.canvas.getContext("2d")?.getImageData(0, 0, width, height).data;
+      if (!alpha) continue;
+      let left = width;
+      let right = -1;
+      let top = height;
+      for (let y = 0; y < height; y++)
+        for (let x = 0; x < width; x++)
+          if (alpha[(y * width + x) * 4 + 3] > 24) {
+            left = Math.min(left, x);
+            right = Math.max(right, x);
+            top = Math.min(top, y);
+          }
+      if (right < 0) continue;
+      s.up = Math.max(s.up, (f.oy - top) / unit);
+      s.reach = Math.max(s.reach, Math.max(f.ox - left, right - f.ox) / unit);
+      if (turn === 0) {
+        s.wide = Math.max(s.wide, (right - left) / unit);
+        if (frame === 0) s.mid = ((left + right) / 2 - f.ox) / unit;
+      }
+    }
   }
   spans.set(role, s);
   return s;
@@ -106,8 +110,9 @@ export function Spirit({ role, mood = "ready", className, scene = false, spin = 
       }
       const frame = tick % FRAMES;
       const turn = turning && !still ? tick % ANGLES : 0;
-      // The boltergeist and its bolt set the scale: about 29 units across and 21 above its feet, or turned, its full reach either way.
-      const fit = scene ? Math.min((h * 0.56) / 24, (w * 0.9) / (REACH.warlord * 2)) : spin ? Math.min((h * 0.84) / 22, (w * 0.96) / (REACH.warlord * 2)) : Math.min((h * 0.84) / 21, (w * 0.96) / 29);
+      // The boltergeist, wings and bolt and all, sets the scale: its height, and across face on or, turned, its full reach either way.
+      const b = span("warlord");
+      const fit = scene ? Math.min((h * 0.56) / (b.up + 3), (w * 0.9) / (b.reach * 2)) : spin ? Math.min((h * 0.84) / (b.up + 1), (w * 0.96) / (b.reach * 2)) : Math.min((h * 0.84) / b.up, (w * 0.96) / (b.wide * 1.04));
       const px = Math.round(fit * grow(role, turning) * 10) / 10;
       const key = `${role}|${px}|${frame}|${mood === "attack"}|${turn}`;
       let f = painted.get(key);
@@ -121,7 +126,7 @@ export function Spirit({ role, mood = "ready", className, scene = false, spin = 
       if (scene) mist(g, w, h, tick, false);
       g.globalAlpha = mood === "ko" ? 0.35 : mood === "hurt" ? 0.65 : 1;
       const lift = scene ? (2.5 + Math.sin((tick / FRAMES) * Math.PI * 2) * 1) * px : 0;
-      g.drawImage(f.canvas, Math.round(w / 2 - f.ox - (turning ? 0 : LEAN[role] * px)), Math.round(foot - f.oy - lift));
+      g.drawImage(f.canvas, Math.round(w / 2 - f.ox - (turning ? 0 : span(role).mid * px)), Math.round(foot - f.oy - lift));
       g.globalAlpha = 1;
       if (scene) mist(g, w, h, tick, true);
     };

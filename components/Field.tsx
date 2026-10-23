@@ -400,13 +400,16 @@ const blob = (ctx: Ctx, x: number, y: number, rx: number, ry: number, color: RGB
 // The clay figures, each look, size and frame made once and kept.
 const figures = new Map<string, Figure>();
 const figure = (key: string, make: () => Figure) => kept(figures, key, 900, make);
-const GHOSTS: Record<Side, RGB> = { long: [214, 240, 228], short: [244, 216, 220] };
+// Your own ghosts are mint either way; rivals' come in hues of their own.
+const GHOSTS: Record<Side, RGB> = { long: [124, 232, 192], short: [124, 232, 192] };
 const FIELD_SIZE: Record<GhostKind, number> = { wisp: 0.95, spectre: 1.1, poltergeist: 1.3 };
 const FRAMES = 8;
 // The kids walk a little behind the price, so their torch lights the ground where it is.
 const KIDS_BACK = (KIDS_LEAD * 2.05) / 26;
 // Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
 const WORDS = 1.45;
+// Every word on the field is set at one size, in tiles tall.
+const WORD = 0.4;
 
 // A torch's beam: a soft cone of warm light, drawn once and laid from the torch to where it shines.
 let beamCone: HTMLCanvasElement | null = null;
@@ -1650,10 +1653,11 @@ export function Field(props: Props) {
     };
 
     // Every word on the field is laid on the ground like the markings on a pitch: reading west to east along a row, or south to north
-    // up a line of time, its foot at (x, y) and about size tiles tall. Drawn last, so nothing stands in front of it.
+    // up a line of time, its foot at (x, y), all at one size. Drawn after the dusk so it stays clear, and cut away wherever something
+    // stands in front of it.
     const labels: (() => void)[] = [];
-    const marking = (text: string, x: number, y: number, size: number, color: string, o: { align?: CanvasTextAlign; up?: boolean; halo?: boolean; glow?: boolean; weight?: number } = {}) => {
-      const f = (A * size * WORDS * (v.w < 600 ? 1.06 : 1)) / 26;
+    const marking = (text: string, x: number, y: number, color: string, o: { align?: CanvasTextAlign; up?: boolean; halo?: boolean; glow?: boolean; weight?: number } = {}) => {
+      const f = (A * WORD * WORDS * (v.w < 600 ? 1.06 : 1)) / 26;
       const at0 = S(x, y);
       ctx.save();
       if (o.up) ctx.setTransform(dpr * f, (-dpr * f) / 2, dpr * f, (dpr * f) / 2, dpr * at0.x, dpr * at0.y);
@@ -1703,7 +1707,7 @@ export function Field(props: Props) {
         const at0 = row(yours.trap.count)[0].x;
         const price = fmt.price(yours.trap.price, tickSize);
         const color = TEAMS[yours.trap.side].ui;
-        labels.push(() => marking(price, at0 - across * 0.6, ya + 0.62, 0.34, color, { align: "right" }));
+        labels.push(() => marking(price, at0 - across * 0.6, ya + 0.62, color, { align: "right" }));
       }
     }
     let spooked = 0;
@@ -1746,12 +1750,12 @@ export function Field(props: Props) {
         });
       }
       const yk = yOf(call.koAt);
-      if (onMap(yk)) labels.push(() => marking(`K.O. ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), 0.28, COLORS.down));
+      if (onMap(yk)) labels.push(() => marking(`K.O. ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), COLORS.down));
     }
     if (yours.flag && yf !== null) {
       const banks = yours.flag.banks;
       const text = `${fmt.price(yours.flag.price, tickSize)}${banks !== undefined ? `  ${fmt.money(banks, true)}` : ""}`;
-      labels.push(() => marking(text, cloudX, yf + 0.7, 0.34, COLORS.volt, { align: "center" }));
+      labels.push(() => marking(text, cloudX, yf + 0.7, COLORS.volt, { align: "center" }));
     }
 
     // Everyone else's ghosts, each player in their own hue, out toward the fog on the row where their graves wait or they came in:
@@ -2050,7 +2054,7 @@ export function Field(props: Props) {
       const x = X(mk.t);
       const y = yOf(mk.p);
       if (!onMap(y) || !seen(S(x, y))) continue;
-      marking(mk.glyph, x, y + 0.2, 0.3, mk.color, { align: "center" });
+      marking(mk.glyph, x, y + 0.2, mk.color, { align: "center" });
     }
 
     // The prices, marked on the ground like the numbers on a pitch: each one every few tiles along its row, set in the ground so they
@@ -2065,7 +2069,7 @@ export function Field(props: Props) {
         const a = x >= 0 ? 0.1 + 0.4 * clamp(x / Math.max(ext.x1, 1), 0, 1) : 0.1 * clamp(1 + x / 2, 0, 1);
         if (a < 0.04 || Math.hypot(x, y - y0) < 2.4) continue;
         if (yf !== null && Math.abs(S(x, y).y - S(cloudX, yf, CLOUD_Z).y) < 1.6 * A && Math.abs(S(x, y).x - S(cloudX, yf).x) < 2.4 * A) continue;
-        marking(text, x, y - 0.1, 0.4, `rgba(214, 224, 255, ${a})`, { align: "center", glow: true });
+        marking(text, x, y - 0.1, `rgba(214, 224, 255, ${a})`, { align: "center", glow: true });
       }
     }
 
@@ -2079,7 +2083,7 @@ export function Field(props: Props) {
     }
     labels.forEach((fn) => fn());
     // The price, marked on the ground just south of the kids' feet.
-    marking(fmt.price(target, tickSize), 0, y0 + 1.05, 0.46, COLORS.volt, { align: "center" });
+    marking(fmt.price(target, tickSize), 0, y0 + 1.05, COLORS.volt, { align: "center" });
 
     // A faint line of now, through the kids and on south of them.
     ctx.save();
@@ -2115,7 +2119,7 @@ export function Field(props: Props) {
       const hy = hover.current!.y - box.top;
       const xc = ((hx - v.OX) / A + (2 * (hy - v.OY)) / A) / 2;
       if (aiming.current) oval(ctx, hx, hy, 16, 16, undefined, picked.color, 2);
-      marking(`${picked.label.toUpperCase()}  ${fmt.price(p, tickSize)}`.trim(), xc, y + (aiming.current ? -1.1 : 0.62), 0.32, picked.color, { align: "center" });
+      marking(`${picked.label.toUpperCase()}  ${fmt.price(p, tickSize)}`.trim(), xc, y + (aiming.current ? -1.1 : 0.62), picked.color, { align: "center" });
     }
     if (wrap.current) wrap.current.style.cursor = picked ? "crosshair" : "";
   }
