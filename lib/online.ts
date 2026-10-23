@@ -1,9 +1,10 @@
-import type { Log, Move, Player, Role } from "./game/war";
+import { ROSTER, type Log, type Move, type Player, type Role } from "./game/war";
 import { signedHeaders, type Keys } from "./live/keys";
 import { PREFIX } from "./store";
 import { NETWORK } from "./strike";
 
-export type Me = { id: string; secret: string; name: string };
+// `chosen` once the player has typed a name of their own, so a nickname from Strike doesn't write over it.
+export type Me = { id: string; secret: string; name: string; chosen?: boolean };
 
 const KEY = `${PREFIX}me`;
 const FIRST = ["Neon", "Turbo", "Lucky", "Rapid", "Silent", "Cosmic", "Iron", "Golden", "Wild", "Shadow", "Crimson", "Frost", "Solar", "Atomic", "Mega"];
@@ -28,14 +29,29 @@ export async function me(): Promise<Me> {
   return made;
 }
 
-export async function rename(name: string): Promise<Me | null> {
+export async function rename(name: string, chosen = true): Promise<Me | null> {
   const clean = name.trim().replace(/\s+/g, " ");
   if (!NAME.test(clean)) return null;
-  const now = { ...(await me()), name: clean };
+  const now = { ...(await me()), name: clean, chosen };
   try {
     localStorage.setItem(KEY, JSON.stringify(now));
   } catch {}
   return now;
+}
+
+// A Strike nickname as a name the board takes: only its letters, numbers, spaces and _ . -, at most 20 long, and not a bot's.
+export function asName(nickname: string): string | null {
+  const clean = nickname.replace(/[^A-Za-z0-9 _.-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 20).trim();
+  const lower = clean.toLowerCase();
+  return NAME.test(clean) && lower !== "you" && !ROSTER.some((r) => r.toLowerCase() === lower) ? clean : null;
+}
+
+// Takes the nickname from a player's Strike account as their name here, unless they've chosen one of their own.
+export async function adopt(nickname: string): Promise<Me | null> {
+  const name = asName(nickname);
+  const kept = await me();
+  if (!name || kept.chosen || kept.name === name) return null;
+  return rename(name, false);
 }
 
 // The game server's clock, less ours: its times come back onto this browser's clock with it. Only taken from answers made just

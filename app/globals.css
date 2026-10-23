@@ -125,32 +125,6 @@ h2 {
   color: var(--mint);
 }
 
-.price {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text);
-  font: 600 18px var(--mono), monospace;
-  font-variant-numeric: tabular-nums;
-}
-
-.price .dim {
-  font: 14px var(--display), sans-serif;
-}
-
-.pulse {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--dim);
-}
-
-.pulse.on {
-  background: var(--mint);
-  box-shadow: 0 0 10px var(--mint);
-  animation: pulse 1.6s ease-in-out infinite;
-}
-
 @keyframes pulse {
   50% {
     opacity: 0.4;
@@ -351,12 +325,6 @@ h2 {
   border-bottom: 2px solid var(--edge);
 }
 
-.card.hero.warlord .stage {
-  background:
-    radial-gradient(ellipse at 50% 100%, rgba(255, 225, 74, 0.3), transparent 65%),
-    linear-gradient(180deg, #1d1a0b, #0d1116);
-}
-
 .card.hero .stage::after {
   content: "";
   position: absolute;
@@ -548,6 +516,20 @@ h2 {
 .corner.right {
   left: auto;
   right: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+/* Once the haunting is on, the clock sits under the round, counting down to its end. */
+.corner .timer {
+  position: static;
+  left: auto;
+  align-items: flex-end;
+  transform: none;
+}
+
+.corner .timer b {
+  font-size: 26px;
 }
 
 /* The time to whatever comes next, top and centre over the field, with what it's counting to above it. */
@@ -582,7 +564,17 @@ h2 {
 }
 
 .back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
   cursor: pointer;
+}
+
+.back svg {
+  display: block;
+  width: 28px;
+  height: 28px;
 }
 
 .back:hover {
@@ -924,6 +916,7 @@ h2 {
   display: block;
   justify-self: center;
   min-width: 0;
+  text-align: center;
 }
 
 /* Three ways to haunt, a toggle whose glowing thumb slides to the one chosen. */
@@ -933,6 +926,7 @@ h2 {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   max-width: 520px;
+  margin-inline: auto;
   padding: 4px;
   background: var(--raised);
   border: 2px solid var(--edge);
@@ -2144,23 +2138,35 @@ h2 {
   text-align: center;
 }
 
+/* The name on the board, asked for just above the haunt button. */
 .handle {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
-  gap: 10px;
-  margin: -16px 0 22px;
+  gap: 6px;
+  margin: 4px 0 14px;
+}
+
+.handle .label {
+  color: var(--mint);
+  font: 13px var(--display), sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .handle input {
-  width: 200px;
-  padding: 5px 10px;
+  width: min(320px, 100%);
+  padding: 10px 14px;
   background: var(--panel);
   border: 2px solid var(--edge);
-  border-radius: 10px;
+  border-radius: 12px;
   color: var(--text);
-  font: 15px var(--display), sans-serif;
+  font: 22px var(--display), sans-serif;
   text-align: center;
+}
+
+.handle small {
+  font-size: 13px;
 }
 
 .handle input:focus {
@@ -2314,5 +2320,14 @@ h2 {
   .back {
     padding: 4px 9px;
     font-size: 12px;
+  }
+
+  .back {
+    padding: 5px 10px;
+  }
+
+  .back svg {
+    width: 24px;
+    height: 24px;
   }
 }

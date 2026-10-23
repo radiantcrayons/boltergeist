@@ -36,7 +36,6 @@ export default function App() {
   const [fatal, setFatal] = useState<string | null>(null);
   const [marks, setMarks] = useState<Record<string, Mark>>({});
   const [tickers, setTickers] = useState<Record<string, Ticker>>({});
-  const [streaming, setStreaming] = useState(false);
   const [symbol, setSymbol] = useState(() => recall("symbol", "BTC-USD"));
   const [ticks, setTicks] = useState<Record<string, Tick[]>>({});
   const [open, setOpen] = useState<string | null>(() => recall("open", null));
@@ -71,7 +70,7 @@ export default function App() {
         timer ??= setTimeout(flush, Math.max(0, last + 250 - Date.now()));
       },
       tickers: (t) => setTickers((all) => ({ ...all, ...t })),
-      status: setStreaming,
+      status: () => {},
     });
     return () => {
       stop();
@@ -176,11 +175,6 @@ export default function App() {
             bolt<b>ergeist</b>
           </span>
         </button>
-        <div className="price" title={`${shown} mark price on Strike`}>
-          <span className={`pulse ${streaming ? "on" : ""}`} />
-          <span className="dim">{market?.base ?? shown}</span>
-          {marks[shown] && market ? fmt.price(marks[shown].p, market.tickSize) : "..."}
-        </div>
         <div className="modes" role="radiogroup" aria-label="Paper, testnet or mainnet">
           {MODES.map((m) => (
             <button key={m} role="radio" aria-checked={mode === m} className={`${m} ${mode === m ? "on" : ""}`} onClick={() => choose(m)} title={MODE_TIPS[m]}>
@@ -226,6 +220,7 @@ export default function App() {
           tickers={tickers}
           live={goingLive}
           available={balance?.available ?? null}
+          nickname={balance?.nickname ?? null}
           joining={war.joining}
           error={war.error}
           onConnect={() => setConnecting(true)}

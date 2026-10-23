@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import * as fmt from "@/lib/format";
 import { arenaAt, gain, KINDS, lineup, placeOf, ROLES, sameGame, SEATS, worth, YOU, type Arena, type Game, type Kind, type Player, type Role } from "@/lib/game/war";
-import { lobbies, me, NAME, rename } from "@/lib/online";
+import { adopt, asName, lobbies, me, NAME, rename } from "@/lib/online";
 import { play, setHaunting } from "@/lib/sfx";
 import { recall, remember } from "@/lib/store";
 import type { Mark, Ticker } from "@/lib/strike";
@@ -26,6 +26,8 @@ type Props = {
   tickers: Record<string, Ticker>;
   live: boolean;
   available: number | null;
+  // The nickname on the player's Strike account, once connected.
+  nickname: string | null;
   joining: boolean;
   error: string | null;
   onConnect: () => void;
@@ -34,7 +36,7 @@ type Props = {
   onOpen: (id: string) => void;
 };
 
-export function Base({ games, markets, marks, tickers, live, available, joining, error, onConnect, onSymbol, onEnter, onOpen }: Props) {
+export function Base({ games, markets, marks, tickers, live, available, nickname, joining, error, onConnect, onSymbol, onEnter, onOpen }: Props) {
   const [kind, setKind] = useState<Kind>(() => (recall<string>("kind", "skirmish") in KINDS ? recall<Kind>("kind", "skirmish") : "skirmish"));
   const [role, setRole] = useState<Role>(() => (recall<string>("role", "commando") in ROLES ? recall<Role>("role", "commando") : "commando"));
   const [hover, setHover] = useState<Role | null>(null);
@@ -66,6 +68,10 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
   useEffect(() => {
     me().then((m) => setName(m.name));
   }, []);
+  // A Strike nickname fills the name in, unless the player has typed their own.
+  useEffect(() => {
+    if (nickname) adopt(nickname).then((m) => m && setName(m.name));
+  }, [nickname]);
   useEffect(() => onSymbol(arena.symbol), [arena.symbol, onSymbol]);
   const running = games.filter((g) => !g.over);
   const finished = games.filter((g) => g.over);
@@ -185,6 +191,19 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
         </div>
       </section>
 
+      <label className="handle">
+        <span className="label">haunting as</span>
+        <input
+          value={name}
+          maxLength={20}
+          spellCheck={false}
+          aria-label="Your name on the board"
+          onChange={(e) => setName(e.target.value)}
+          onBlur={() => (NAME.test(name.trim()) ? rename(name) : me()).then((m) => m && setName(m.name))}
+          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+        />
+        {nickname && asName(nickname) === name && <small className="dim">your Strike nickname</small>}
+      </label>
       <button
         className={`go ${live ? "live" : ""}`}
         disabled={!ready || joining}
@@ -204,18 +223,6 @@ export function Base({ games, markets, marks, tickers, live, available, joining,
               : `${KINDS[kind].name} on ${market?.base ?? arena.symbol} as ${ROLES[role].hero}, ${fmt.whole(stake)} ${live ? "real stake on Strike" : "paper stake"}, ${when(arena)}`}
         </small>
       </button>
-      <label className="handle">
-        <span className="dim">haunting as</span>
-        <input
-          value={name}
-          maxLength={20}
-          spellCheck={false}
-          aria-label="Your name on the board"
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => (NAME.test(name.trim()) ? rename(name) : me()).then((m) => m && setName(m.name))}
-          onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-        />
-      </label>
       {error && <p className="error center">{error}</p>}
       {!live && (
         <p className="golive">

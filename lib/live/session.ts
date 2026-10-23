@@ -18,7 +18,7 @@ export type Session = {
   expiresAt?: number;
 };
 
-export type Balance = { wallet: number; available: number };
+export type Balance = { wallet: number; available: number; nickname?: string };
 
 const KEY = `tradewars.session.${NETWORK}`;
 // A pasted API key never expires on Strike, so this browser forgets it after a while.
@@ -115,6 +115,7 @@ export async function viaKey(secretHex: string): Promise<Session> {
 }
 
 export async function balance(keys: Keys): Promise<Balance> {
-  const a = await signed<{ wallet_balance: string; available_balance: string }>(keys, "GET", "/v2/account");
-  return { wallet: Number(a.wallet_balance) || 0, available: Number(a.available_balance) || 0 };
+  const a = await signed<{ wallet_balance: string; available_balance: string; nickname?: string }>(keys, "GET", "/v2/account");
+  const nickname = typeof a.nickname === "string" ? a.nickname.trim() : "";
+  return { wallet: Number(a.wallet_balance) || 0, available: Number(a.available_balance) || 0, ...(nickname && { nickname }) };
 }

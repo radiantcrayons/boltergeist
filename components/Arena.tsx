@@ -299,23 +299,24 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
       <section className="field">
         <div className="corner">
           <button className="back" onClick={onLeave} title="Back to the start: the game carries on" aria-label="Back to the start">
-            &larr;
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M21 12H5M12 4l-8 8 8 8" fill="none" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
         </div>
-        <div className="corner right">
-          <span className="chip" title={waiting ? "Everyone starts together when the lobby closes" : "Each round raises the least power you can haunt with"}>
-            {waiting ? (
-              <>
-                lobby <span className="dim">{rounds} rounds</span>
-              </>
-            ) : (
-              <>
-                round {round + 1}/{rounds}
-              </>
+        {!waiting && (
+          <div className="corner right">
+            <span className="chip" title="Each round raises the least power you can haunt with">
+              round {round + 1}/{rounds}
+              {game.live && <span className="tag">live</span>}
+            </span>
+            {!game.over && nowMs < game.endsAt && (
+              <div className={`timer ${hurry ? "hurry" : ""}`} title={nextAt === game.endsAt ? "Until the final bell" : `Until round ${round + 1} ends`}>
+                <b>{fmt.clock(nextAt - nowMs)}</b>
+              </div>
             )}
-            {game.live && <span className="tag">live</span>}
-          </span>
-        </div>
+          </div>
+        )}
         <Field
             key={game.id}
             candles={candles}
@@ -333,9 +334,9 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             pick={pick}
             onPick={onPick}
           />
-        {!game.over && nowMs < game.endsAt && !(waiting && count <= 10) && (
-          <div className={`timer ${hurry ? "hurry" : ""}`}>
-            <small>{waiting ? "the haunting starts in" : nextAt === game.endsAt ? "final bell in" : `round ${round + 2} starts in`}</small>
+        {waiting && !(count <= 10) && (
+          <div className="timer" title="Everyone starts together when the lobby closes">
+            <small>lobby</small>
             <b>{fmt.clock(nextAt - nowMs)}</b>
           </div>
         )}
@@ -412,7 +413,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             ))}
           </div>
           <span className="readout dim">
-            {me.call ? `${me.call.power}x, ` : ""}K.O. {(away * 100).toFixed(1)}% away{!me.call && !waiting && fear === 0 && round > 0 ? `, the least round ${round + 1} allows` : ""}
+            {me.call ? `${me.call.power}x, ` : ""}{(away * 100).toFixed(1)}% away from being busted{!me.call && !waiting && fear === 0 && round > 0 ? `, the least round ${round + 1} allows` : ""}
           </span>
         </div>
 
