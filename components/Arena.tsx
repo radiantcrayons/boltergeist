@@ -219,11 +219,13 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const shownPrice = mark?.p ?? game.price;
   const sideOf = (p: number): Side => (p < shownPrice ? "long" : "short");
   // A click takes the side of the price it lands on, then the nearest tick on that side, so one by the kids is never the price itself.
+  // The game server checks against its own copy of the price, a moment apart from ours, so nothing goes closer than a safe margin.
+  const margin = Math.max(3 * tickSize, shownPrice * 0.0001);
   const onTick = (p: number) => {
     const up = p >= shownPrice;
     let at = (up ? Math.ceil : Math.floor)(p / tickSize - (up ? 1e-9 : -1e-9)) * tickSize;
-    if (up && at <= game.price) at += tickSize;
-    if (!up && at >= game.price) at -= tickSize;
+    if (up && at < shownPrice + margin) at = Math.ceil((shownPrice + margin) / tickSize - 1e-9) * tickSize;
+    if (!up && at > shownPrice - margin) at = Math.floor((shownPrice - margin) / tickSize + 1e-9) * tickSize;
     return Number(at.toFixed(12));
   };
   const pick = (raw: number): Pick | null => {
