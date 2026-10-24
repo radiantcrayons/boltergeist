@@ -1087,7 +1087,6 @@ export function Field(props: Props) {
     // How far round the beat your ghosts flash red to has come, and when it was last moved on.
     beat: { phase: number; at: number };
     gait: { walked: number; y: number; price: number; at: number; aim: number; quiet: number; turn: number; pose: number; pace: number };
-    rain: Float32Array | null;
   }>({
     past: [],
     call: null,
@@ -1099,7 +1098,6 @@ export function Field(props: Props) {
     zap: null,
     beat: { phase: 0, at: 0 },
     gait: { walked: 0, y: 0, price: 0, at: 0, aim: 0, quiet: 0, turn: 0, pose: KID_TURNS / 2, pace: 1 },
-    rain: null,
   });
   const grass = useRef<{ c: HTMLCanvasElement | null; x0: number; y0: number; w: number; h: number; n: number }>({ c: null, x0: 0, y0: 0, w: 0, h: 0, n: 0 });
   const painting = useRef<{ c: HTMLCanvasElement; x0: number; y0: number; w: number; h: number; img: ImageData; row: number } | null>(null);
@@ -2240,50 +2238,93 @@ export function Field(props: Props) {
     if (yf !== null) drawClouds(cloudX, yf, 1);
     for (const f of fading) drawCloud(f.x, f.y, f.alpha, f.size);
 
-    // Rain, heavier round by round: a drop falling slantwise in each patch of the view, and a splash where it lands.
+    // Rain, heavier round by round: a drop falling slantwise onto each patch of ground, and a splash where it lands. Each drop
+    // belongs to its patch of the ground, not of the screen, so when the view pans to follow the price the rain goes with the field.
+    // Water in three tones, thin drops and the odd heavy one with a bright bead at its head, each its own length; landing, a crown
+    // splash with two droplets thrown up and a ring spreading where it hit.
+    const drops: { x: number; y: number; ph: number; a: number; b: number }[] = [];
+    const RAIN_FALL = 150;
     if (wet > 0.04) {
       // On a phone the drops fall a little further apart: the same rain, fewer strokes.
       const cell = v.w < 600 || coarse() ? 24 : 17;
-      const fall = 150;
-      const cols = Math.ceil(v.w / cell) + 8;
-      const rows = Math.ceil(v.h / cell) + 2;
-      if (!m.rain || m.rain.length !== cols * rows * 4) {
-        m.rain = new Float32Array(cols * rows * 4);
-        for (let n = 0; n < cols * rows; n++) {
-          const h = hash(n * 73.1 + 17.3);
-          m.rain.set([h, 0.42 + hash(h * 91) * 0.3, hash(h * 57), hash(h * 13) * 0.5 + hash(h * 29) * 0.5], n * 4);
-        }
-      }
-      const drops = m.rain;
       const t = at / 1000;
-      ctx.beginPath();
-      for (let gy = 0; gy < rows; gy++) {
-        for (let gx = 0; gx < cols; gx++) {
-          const n = (gy * cols + gx) * 4;
-          if (drops[n] > wet) continue;
-          const period = drops[n + 1];
-          const ph = (((t + drops[n + 2] * period) % period) + period) % period / period;
-          const lx = (gx - 1) * cell + drops[n + 3] * cell;
-          const ly = (gy - 1) * cell + drops[n + 2] * cell;
-          if (ph < 0.9) {
-            const drop = fall * (1 - ph);
-            const x = lx - drop * 0.28;
-            const y = ly - drop;
-            ctx.moveTo(x, y);
-            ctx.lineTo(x + 3.4, y + 12);
-          } else {
-            const r = 1.5 + (ph - 0.9) * 30;
-            ctx.moveTo(lx - r, ly - r * 0.4);
-            ctx.lineTo(lx - r * 0.4, ly);
-            ctx.moveTo(lx + r, ly - r * 0.4);
-            ctx.lineTo(lx + r * 0.4, ly);
-          }
+      // Where the ground's own lattice of patches sits on the screen just now, and which patch is the first in view.
+      const gx = (-nowX + g.cy - R / 2) * A;
+      const gy = ((-nowX - g.cy + R / 2) * A) / 2;
+      const i0 = Math.floor(-gx / cell) - 1;
+      const j0 = Math.floor(-gy / cell) - 1;
+      const cols = Math.ceil((v.w + RAIN_FALL * 0.28) / cell) + 3;
+      const rows = Math.ceil((v.h + RAIN_FALL) / cell) + 3;
+      const roll = (i: number, j: number, k: number) => hash((((i % 9973) + 9973) % 9973) * 73.1 + (((j % 9973) + 9973) % 9973) * 151.7 + k * 17.3);
+      for (let jj = 0; jj < rows; jj++) {
+        for (let ii = 0; ii < cols; ii++) {
+          const i = i0 + ii;
+          const j = j0 + jj;
+          if (roll(i, j, 0) > wet) continue;
+          const period = 0.42 + roll(i, j, 1) * 0.3;
+          const off = roll(i, j, 2);
+          const ph = ((((t + off * period) % period) + period) % period) / period;
+          const x = gx + i * cell + roll(i, j, 3) * cell;
+          const y = gy + j * cell + off * cell;
+          if (x < -20 || y < -20 || x > v.w + RAIN_FALL * 0.28 + 20 || y > v.h + RAIN_FALL + 20) continue;
+          drops.push({ x, y, ph, a: roll(i, j, 4), b: roll(i, j, 5) });
         }
       }
-      ctx.strokeStyle = "rgba(214, 224, 242, 0.6)";
-      ctx.lineWidth = 1;
+    }
+    if (drops.length) {
+      const tones = ["rgba(188, 208, 236, 0.42)", "rgba(222, 234, 250, 0.62)", "rgba(150, 178, 214, 0.5)"];
+      const thin = tones.map(() => new Path2D());
+      const heavy = tones.map(() => new Path2D());
+      const beads = new Path2D();
+      const crowns = new Path2D();
+      const rings = new Path2D();
+      const thrown = new Path2D();
+      for (const d of drops) {
+        const tone = Math.floor(d.a * 3) % 3;
+        const big = d.b > 0.74;
+        if (d.ph < 0.9) {
+          // (in the air, from its top to its foot)
+          const long = 8 + ((d.a * 7.3) % 1) * 9 + (big ? 4 : 0);
+          const drop = RAIN_FALL * (1 - d.ph);
+          const x = d.x - drop * 0.28;
+          const y = d.y - drop;
+          const path = (big ? heavy : thin)[tone];
+          path.moveTo(x, y);
+          path.lineTo(x + long * 0.28, y + long);
+          if (big) {
+            beads.moveTo(x + long * 0.28 + 1.1, y + long);
+            beads.arc(x + long * 0.28, y + long, 1.1, 0, Math.PI * 2);
+          }
+          continue;
+        }
+        const k = (d.ph - 0.9) / 0.1;
+        const r = 1.5 + k * 3;
+        crowns.moveTo(d.x - r, d.y - r * 0.4);
+        crowns.lineTo(d.x - r * 0.4, d.y);
+        crowns.moveTo(d.x + r, d.y - r * 0.4);
+        crowns.lineTo(d.x + r * 0.4, d.y);
+        rings.moveTo(d.x + 2 + k * 7, d.y);
+        rings.ellipse(d.x, d.y, 2 + k * 7, (2 + k * 7) * 0.42, 0, 0, Math.PI * 2);
+        for (const side of [-1, 1]) thrown.rect(d.x + side * (1.5 + k * 4), d.y - 3 * Math.sin(Math.PI * k) - 1, 1.2, 1.2);
+      }
+      ctx.lineCap = "round";
+      tones.forEach((tone, n) => {
+        ctx.strokeStyle = tone;
+        ctx.lineWidth = 0.9;
+        ctx.stroke(thin[n]);
+        ctx.lineWidth = 1.5;
+        ctx.stroke(heavy[n]);
+      });
       ctx.lineCap = "butt";
-      ctx.stroke();
+      ctx.fillStyle = "rgba(240, 247, 255, 0.85)";
+      ctx.fill(beads);
+      ctx.strokeStyle = "rgba(214, 228, 248, 0.55)";
+      ctx.lineWidth = 1;
+      ctx.stroke(crowns);
+      ctx.strokeStyle = "rgba(200, 220, 246, 0.28)";
+      ctx.stroke(rings);
+      ctx.fillStyle = "rgba(226, 238, 252, 0.7)";
+      ctx.fill(thrown);
     }
 
     // Dusk: everything dimmed toward a cool blue, deeper as the storm comes in, then the lantern and the ghosts glowing through it.

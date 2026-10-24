@@ -305,13 +305,12 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     ...(flag !== undefined && { flag: { price: flag, banks: me.call ? valueOf(me.call, flag, STRIKE.maker) - me.call.stake : undefined, ahead: flagAhead?.orders } }),
     ...(ended && { end: { by: ended.what === "ko" ? "bust" : ended.maker ? "cloud" : "hand", at: ended.at } }),
   };
-  // How far from your ghosts to the bust the price has come, 0 at your entry and 100 at the bust, in whole percent. The gauge
-  // shows only while you're losing: it comes in at 2% and goes at 0, so a price trembling at your entry doesn't flick it on and off.
-  const toBust = me.call ? Math.min(1, Math.max(0, (me.call.side === "long" ? me.call.entry - shownPrice : shownPrice - me.call.entry) / (Math.abs(me.call.entry - me.call.koAt) || 1))) : 0;
-  const bustPct = Math.round(toBust * 100);
-  const [gauged, setGauged] = useState(false);
-  const gauge = !!me.call && !game.over && (gauged ? bustPct >= 1 : bustPct >= 2);
-  if (gauge !== gauged) setGauged(gauge);
+  // The give-up button shows how the call stands by what it would walk away with: yellow at about even, pulsing toward red as the
+  // loss grows and toward green as the gain grows, deeper and quicker the further it goes, all the way at half the stake. In four
+  // steps, so the beat doesn't start over with every tick.
+  const swing = me.call ? Math.max(-1, Math.min(1, walkAway / (me.call.stake * 0.5))) : 0;
+  const heat = Math.round(Math.abs(swing) * 4);
+  const glow = heat ? heatOf(swing < 0 ? ROSE : MINT, heat) : null;
   const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => roundEnds(game, r));
   // What's next on the clock: the start in the lobby, then each new round, then the final bell.
   const nextAt = waiting ? game.startsAt : (steps.find((t) => t > nowMs) ?? game.endsAt);
@@ -373,26 +372,6 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
           <div className="count boo" aria-hidden="true">
             <b>boo!</b>
             <small>the haunting begins</small>
-          </div>
-        )}
-        {gauge && me.call && (
-          <div
-            className={`gauge ${me.call.side} losing ${bustPct >= 50 ? "near" : ""}`}
-            style={{ "--to": toBust } as CSSProperties}
-            role="meter"
-            aria-label="How far you are toward being busted"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={bustPct}
-          >
-            <span className="end in">in {fmt.price(me.call.entry, tickSize)}</span>
-            <span className="rail">
-              <i className="fill" />
-              <i className="now">
-                <em>{bustPct}% bust</em>
-              </i>
-            </span>
-            <span className="end out">bust {fmt.price(me.call.koAt, tickSize)}</span>
           </div>
         )}
         {moment &&
@@ -481,7 +460,8 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
                 <span className="flag">click {me.call.side === "long" ? "above" : "below"} them for a thundercloud</span>
               </div>
               <button
-                className="order bank"
+                className={`order bank ${glow ? "hot" : ""}`}
+                style={glow ?? undefined}
                 onClick={bank}
                 disabled={!can}
                 title={`What you walk away with if you give up now, after every fee: Strike's fee to get in and ${fmt.money(bankFee)} for closing at the market. Hold on and a thundercloud pays you instead (space)`}
@@ -572,6 +552,17 @@ function share(game: Game, place: number, change: number) {
 }
 
 const BOOK_SIDE: Record<Side, L3Side> = { long: "buy", short: "sell" };
+// The give-up button's yellow, and what it runs to: red for a loss, green for a gain. At each of the four steps (heat) it rests a
+// little further from the yellow and pulses all the way to its colour at the last, the beat quickening from 1.6 s to 0.6 s.
+const VOLT = [255, 225, 74];
+const ROSE = [255, 77, 109];
+const MINT = [43, 245, 181];
+const BEATS = [1.6, 1.15, 0.85, 0.6];
+function heatOf(to: number[], heat: number): CSSProperties {
+  const at = (f: number, dark = 1) => `rgb(${VOLT.map((c, i) => Math.round((c + (to[i] - c) * f) * dark)).join(", ")})`;
+  const hot = 0.3 + 0.175 * heat;
+  return { "--rest": at(0.12 * heat), "--rest-edge": at(0.12 * heat, 0.66), "--hot": at(hot), "--hot-edge": at(hot, 0.66), "--beat": `${BEATS[heat - 1]}s` } as CSSProperties;
+}
 const FEARS = ["whisper", "howl", "shriek"];
 // How many graves each digs, and so how many ghosts rise when they spring.
 const COUNTS = [4, 8, 12];

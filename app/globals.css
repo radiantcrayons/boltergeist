@@ -698,130 +698,6 @@ h2 {
   }
 }
 
-/* While you're losing, how far the price has come from your ghosts toward your bust: a rail down the field's west edge, your price
-   at one end and the bust at the other, the way they lie on the field (the bust south of you for a long, north for a short),
-   fading in as it comes. */
-.gauge {
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 10px;
-  height: min(52%, 300px);
-  pointer-events: none;
-  transform: translateY(-50%);
-  font: 12px var(--mono), monospace;
-  text-transform: uppercase;
-  animation: gauge-in 0.35s ease-out;
-}
-
-@keyframes gauge-in {
-  from {
-    opacity: 0;
-  }
-}
-
-.gauge.short {
-  flex-direction: column-reverse;
-}
-
-.gauge .end {
-  padding: 2px 7px;
-  background: rgba(9, 12, 16, 0.85);
-  border: 1px solid;
-  border-radius: 6px;
-  white-space: nowrap;
-}
-
-.gauge .in {
-  border-color: rgba(43, 245, 181, 0.4);
-  color: var(--mint);
-}
-
-.gauge .out {
-  border-color: rgba(255, 77, 109, 0.55);
-  color: var(--rose);
-}
-
-.gauge .rail {
-  position: relative;
-  flex: 1;
-  width: 8px;
-  margin-left: 12px;
-  background: rgba(9, 12, 16, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 6px;
-}
-
-.gauge .fill {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: calc(var(--to) * 100%);
-  background: linear-gradient(rgba(255, 77, 109, 0.45), var(--rose));
-  border-radius: 6px;
-  transition: height 0.25s linear;
-}
-
-.gauge.short .fill {
-  top: auto;
-  bottom: 0;
-  background: linear-gradient(var(--rose), rgba(255, 77, 109, 0.45));
-}
-
-.gauge .now {
-  position: absolute;
-  top: calc(var(--to) * 100%);
-  left: 50%;
-  width: 16px;
-  height: 16px;
-  margin: -8px 0 0 -8px;
-  background: var(--text);
-  border: 3px solid var(--mint);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px #000;
-  transition: top 0.25s linear, bottom 0.25s linear;
-}
-
-.gauge.short .now {
-  top: auto;
-  bottom: calc(var(--to) * 100%);
-  margin: 0 0 -8px -8px;
-}
-
-.gauge .now em {
-  position: absolute;
-  top: 50%;
-  left: 18px;
-  color: var(--text);
-  font-style: normal;
-  white-space: nowrap;
-  text-shadow: 0 1px 0 #000, 0 0 6px #000;
-  transform: translateY(-50%);
-}
-
-.gauge.losing .now {
-  border-color: var(--rose);
-}
-
-.gauge.losing .now em {
-  color: var(--rose);
-}
-
-.gauge.near .rail {
-  animation: alarm 0.8s ease-in-out infinite;
-}
-
-@keyframes alarm {
-  50% {
-    box-shadow: 0 0 14px 3px rgba(255, 77, 109, 0.8);
-  }
-}
-
 
 
 
@@ -1209,6 +1085,21 @@ h2 {
 .order.bank {
   background: var(--volt);
   box-shadow: 0 5px 0 #a8901a;
+}
+
+/* Winning or losing, it pulses from a little off its yellow toward green or red, quicker and deeper the further the call has gone
+   (its colours and beat set from the game: Arena.tsx heatOf). */
+.order.bank.hot {
+  background: var(--rest);
+  box-shadow: 0 5px 0 var(--rest-edge);
+  animation: throb var(--beat) ease-in-out infinite;
+}
+
+@keyframes throb {
+  50% {
+    background: var(--hot);
+    box-shadow: 0 5px 0 var(--hot-edge);
+  }
 }
 
 .order.bank span {
@@ -2393,9 +2284,13 @@ h2 {
   }
 
   .banner,
-  .gauge,
-  .gauge.near .rail {
+  .order.bank.hot {
     animation: none;
+  }
+
+  .order.bank.hot {
+    background: var(--hot);
+    box-shadow: 0 5px 0 var(--hot-edge);
   }
 
   .count.boo {
@@ -2518,11 +2413,5 @@ h2 {
 
   .timer.lobby b {
     font-size: 30px;
-  }
-
-  .gauge {
-    left: 10px;
-    height: 44%;
-    font-size: 11px;
   }
 }
