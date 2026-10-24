@@ -310,6 +310,24 @@ h2 {
   overflow: hidden;
 }
 
+/* A ghost you can't pick while you're in this fright's game as another: greyed, and still. */
+.card:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.7);
+}
+
+.card:disabled:hover,
+.card.hero:disabled:hover .art {
+  transform: none;
+}
+
+.pick .locked {
+  margin: -4px 0 12px;
+  color: var(--soft);
+  font-size: 14px;
+}
+
 .card.hero > span:not(.stage) {
   padding: 0 18px;
 }

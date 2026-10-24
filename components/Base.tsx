@@ -83,6 +83,10 @@ export function Base({ games, markets, marks, tickers, live, paper, available, n
   }, 0);
   const market = markets.find((m) => m.symbol === arena.symbol);
   const joined = games.find((g) => sameGame(g.id, arena.id));
+  // In this fright's game already, you're the ghost you came in as until its doors close and the next one is the one to join: the
+  // others can't be picked till then, and your own pick comes back after.
+  const inAs = joined?.fighters.find((f) => f.id === YOU)?.role;
+  const shown = inAs ?? role;
   const stake = ROLES[role].stake;
   const short = !joined && live && available !== null && available < stake;
   const ready = !!joined || (!!marks[arena.symbol] && !short);
@@ -164,15 +168,23 @@ export function Base({ games, markets, marks, tickers, live, paper, available, n
 
       <section className="pick" aria-label="Your ghost">
         <h2>choose your ghost</h2>
+        {inAs && joined && (
+          <p className="locked">
+            You&apos;re in this {KINDS[kind].name} as {ROLES[inAs].hero}. Pick another ghost for the next one once its doors close, in {fmt.clock(Math.max(0, joined.startsAt + KINDS[kind].doors - now))}.
+          </p>
+        )}
         <div className="cards heroes" role="radiogroup">
           {(Object.keys(ROLES) as Role[]).map((r) => {
-            const mood: Mood = r === role ? (hover === r ? "attack" : "happy") : hover === r ? "attack" : "ready";
+            const locked = !!inAs && r !== inAs;
+            const mood: Mood = r === shown ? (hover === r ? "attack" : "happy") : hover === r && !locked ? "attack" : "ready";
             return (
               <button
                 key={r}
                 role="radio"
-                aria-checked={r === role}
-                className={`card hero ${r} ${r === role ? "on" : ""}`}
+                aria-checked={r === shown}
+                className={`card hero ${r} ${r === shown ? "on" : ""}`}
+                disabled={locked}
+                title={locked ? `You're in this ${KINDS[kind].name} as ${ROLES[inAs].hero}` : undefined}
                 onMouseEnter={() => setHover(r)}
                 onMouseLeave={() => setHover(null)}
                 onClick={() => {
