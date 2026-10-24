@@ -642,6 +642,34 @@ h2 {
   height: 100%;
 }
 
+/* The zoom, said for a moment when it changes, in the field's bottom right corner. */
+.chart .zoomed {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 4px 10px;
+  background: rgb(20, 24, 30);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 9px;
+  color: var(--text);
+  font: 15px var(--display), sans-serif;
+  pointer-events: none;
+  animation: zoomed 1.4s ease-out both;
+}
+
+@keyframes zoomed {
+  from {
+    opacity: 0;
+  }
+  12%,
+  70% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 
 
 

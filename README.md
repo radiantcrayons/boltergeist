@@ -56,7 +56,8 @@ and your graves and thunderclouds are real orders in Strike's book, and every ca
   carved pumpkins, and the ground ahead of them is in haze that thickens into fog: nobody knows where
   they'll walk. Every word on it is laid on the ground like the markings on a pitch: the price just south of
   the kids' feet, the prices marked along their rows and fading into the past behind them, and the clock along
-  the line of time they stand on. Pointing at the field shows, faintly, the graves or thundercloud a click would put there. Everything on it is clay, drawn in code: the kids and the ghosts are rounded parts
+  the line of time they stand on. Pointing at the field shows, faintly, the graves or thundercloud a click would put there. Pinch the
+  field, or turn the mouse wheel or swipe the trackpad over it, to zoom out to 50% or in to 200%. Everything on it is clay, drawn in code: the kids and the ghosts are rounded parts
   lit in hard bands, so there are no image files. Under it all, a low horror score, and sounds made in the
   browser: thuds, the earth cracking open, wind and thunder.
 - **Rain all night.** It rains the whole haunt, with soft shadows lit from above. The only lightning is your

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as fmt from "@/lib/format";
 import { play } from "@/lib/sfx";
 import type { Role, Side } from "@/lib/game/war";
@@ -481,20 +481,48 @@ const figures = new Map<string, Figure>();
 let figureBytes = 0;
 const bytesOf = (f: Figure) => f.canvas.width * f.canvas.height * 4;
 const budget = () => (typeof window !== "undefined" && (innerWidth < 600 || matchMedia("(pointer: coarse)").matches) ? 24e6 : 64e6);
-function figure(key: string, make: () => Figure): Figure {
+// The sizes each figure has been made at, by its family (what it is, its size left out), so one wanted at a size not made yet is
+// drawn scaled from the nearest size made while the right one is made between frames: a zoom never waits on them. Asked
+// without a family, a figure is made there and then.
+const families = new Map<string, Map<number, string>>();
+const familyOf = new Map<string, [string, number]>();
+function figure(key: string, make: () => Figure, family?: string, px?: number): Figure {
   const was = figures.get(key);
   if (was) {
     figures.delete(key);
     figures.set(key, was);
     return was;
   }
+  if (family !== undefined && px !== undefined) {
+    familyOf.set(key, [family, px]);
+    const sizes = families.get(family);
+    let best = 0;
+    for (const p of sizes?.keys() ?? []) if (!best || Math.abs(Math.log(p / px)) < Math.abs(Math.log(best / px))) best = p;
+    const near = best ? figures.get(sizes!.get(best)!) : undefined;
+    if (near) {
+      soon(key, make);
+      const k = px / best;
+      return { canvas: near.canvas, ox: near.ox * k, oy: near.oy * k, w: near.w * k, h: near.h * k };
+    }
+  }
   const made = make();
   figures.set(key, made);
   figureBytes += bytesOf(made);
+  const mine = familyOf.get(key);
+  if (mine) {
+    let sizes = families.get(mine[0]);
+    if (!sizes) families.set(mine[0], (sizes = new Map()));
+    sizes.set(mine[1], key);
+  }
   for (const [k, f] of figures) {
     if (figureBytes <= budget() || figures.size <= 1) break;
     figures.delete(k);
     figureBytes -= bytesOf(f);
+    const gone = familyOf.get(k);
+    if (gone) {
+      families.get(gone[0])?.delete(gone[1]);
+      familyOf.delete(k);
+    }
   }
   return made;
 }
@@ -518,12 +546,15 @@ function forest(ry: number) {
 const SEE_THROUGH = 0.25;
 // Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
 const WORDS = 1.45;
+// How near the view is: half as near, as it opens, or twice as near; and how long it takes to go from one to the next.
+const ZOOMS = [0.5, 1, 2];
+const ZOOM_MS = 260;
 // Every word on the field is set at one size, in tiles tall; the prices you've set sit a little see-through.
 const WORD = 0.4;
 const SET = 0.72;
 
-const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px));
-const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant));
+const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px), "storm", px);
+const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant), `tree|${variant}`, px);
 // The kids turn as they climb and drop: sixteen steps across the half turn from north through east to south, plus straight east.
 const KID_TURNS = 16;
 const kidTurn = (i: number) => (i / KID_TURNS - 0.5) * Math.PI;
@@ -543,11 +574,11 @@ const turnTo = (from: number, to: number, dt: number, { ease, rate }: { ease: nu
   return from + clamp((to - from) * (1 - Math.exp(-dt / ease)), -most, most);
 };
 const kidsKey = (px: number, stride: number, turn: number) => `kids|${px}|${stride}|${turn}`;
-const kidsAt = (px: number, stride: number, turn = KID_TURNS / 2) => figure(kidsKey(px, stride, turn), () => paintKids(px, stride, STRIDES, kidTurn(turn)));
-const bonesAt = (px: number, stride: number, turn: number) => figure(`bones|${px}|${stride}|${turn}`, () => paintKids(px, stride, STRIDES, kidTurn(turn), true));
+const kidsAt = (px: number, stride: number, turn = KID_TURNS / 2) => figure(kidsKey(px, stride, turn), () => paintKids(px, stride, STRIDES, kidTurn(turn)), `kids|${stride}|${turn}`, px);
+const bonesAt = (px: number, stride: number, turn: number) => figure(`bones|${px}|${stride}|${turn}`, () => paintKids(px, stride, STRIDES, kidTurn(turn), true), `bones|${stride}|${turn}`, px);
 const ghostKey = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) => `ghost|${kind}|${body}|${px}|${frame}|${boo ? 1 : 0}|${turn}`;
 const ghostAt = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn = 0) =>
-  figure(ghostKey(kind, body, px, frame, boo, turn), () => paintSpook(kind, body, px, frame, FRAMES, boo, turn));
+  figure(ghostKey(kind, body, px, frame, boo, turn), () => paintSpook(kind, body, px, frame, FRAMES, boo, turn), `ghost|${kind}|${body}|${frame}|${boo ? 1 : 0}|${turn}`, px);
 
 // Figures wanted soon are made in the browser's quiet moments between frames, a few at a time, never inside one.
 const toBake = new Map<string, () => Figure>();
@@ -563,6 +594,15 @@ function bake(d?: IdleDeadline) {
   }
   if (toBake.size) idle(bake);
   else baking = false;
+}
+// One figure to be made between frames.
+function soon(key: string, make: () => Figure) {
+  if (toBake.has(key)) return;
+  toBake.set(key, make);
+  if (!baking) {
+    baking = true;
+    idle(bake);
+  }
 }
 function kidsSoon(px: number, turn: number) {
   for (let stride = 0; stride < STRIDES; stride++) {
@@ -1071,7 +1111,16 @@ export function Field(props: Props) {
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const latest = useRef(props);
-  const view = useRef({ w: 0, h: 0, A: 20, OX: 0, OY: 0 });
+  const view = useRef({ w: 0, h: 0, A: 20, z: 1, OX: 0, OY: 0 });
+  // The zoom: the level it's at, the level it's going from while the view eases between them and since when, the frame as it was
+  // when it set off, and a scratch canvas for the frame being eased in.
+  const zoom = useRef<{ at: number; from: number; since: number; was: HTMLCanvasElement | null; scratch: HTMLCanvasElement | null }>({ at: 1, from: 1, since: 0, was: null, scratch: null });
+  const [zoomed, setZoomed] = useState<{ level: number; n: number } | null>(null);
+  // The fingers on the field, and a pinch between two of them: how far apart they were at its last step, and whether this touch has
+  // pinched (so lifting the last finger doesn't place anything).
+  const touches = useRef(new Map<number, Pt>());
+  const pinch = useRef<{ d: number } | null>(null);
+  const pinched = useRef(false);
   // The scale is fixed once it's set: a price is always the same row of ground, and the view pans to follow the kids.
   const ground = useRef({ rowSize: 0, ref: 0, cy: 0, shown: 0, lag: 0, at: 0 });
   const memory = useRef<{
@@ -1825,7 +1874,7 @@ export function Field(props: Props) {
           const turn = y < y0 ? 4 : 28;
           const skin = mix([146, 184, 124], tint, 0.14).map(Math.round) as RGB;
           const hpx = Math.round(0.094 * A * dpr * 10) / 10;
-          const hf = figure(`zombie|${hpx}|${skin}|${turn}`, () => paintZombie(skin, hpx, turn));
+          const hf = figure(`zombie|${hpx}|${skin}|${turn}`, () => paintZombie(skin, hpx, turn), `zombie|${skin}|${turn}`, hpx);
           risen({ c: hf.canvas, ox: hf.ox / dpr, oy: hf.oy / dpr, w: hf.w / dpr, h: hf.h / dpr }, q, eh, fade, 1.4 * k);
           if (eh > 0.6) glows.push({ p: { x: q.x, y: q.y - 7.4 * k }, r: 0.4 * A, rgb: "252, 226, 120", a: 0.38 * fade });
         }
@@ -1905,7 +1954,8 @@ export function Field(props: Props) {
     // stands in front of it.
     const labels: (() => void)[] = [];
     const marking = (text: string, x: number, y: number, color: string, o: { align?: CanvasTextAlign; up?: boolean; halo?: boolean; glow?: boolean; weight?: number; alpha?: number } = {}) => {
-      const f = (A * WORD * WORDS * (v.w < 600 ? 1.06 : 1)) / 26;
+      // (zoomed out, the words shrink less than the field, so they still read)
+      const f = ((A * WORD * WORDS * (v.w < 600 ? 1.06 : 1)) / 26) * (v.z < 1 ? 0.75 / v.z : 1);
       const at0 = S(x, y);
       const m = o.up ? [dpr * f, (-dpr * f) / 2, dpr * f, (dpr * f) / 2] : [dpr * f, (dpr * f) / 2, -dpr * f, (dpr * f) / 2];
       // Its box on the screen, from its box in its own lettering, padded for the halo.
@@ -2581,6 +2631,70 @@ export function Field(props: Props) {
     }
     const pointer = picked ? "crosshair" : "";
     if (wrap.current && cursor.current !== pointer) wrap.current.style.cursor = cursor.current = pointer;
+
+    // Zooming: the frame just drawn and the frame from before the zoom, both brought to this moment's zoom about the middle of the
+    // view, the old fading out over the new.
+    const zm = zoom.current;
+    const zt = (at - zm.since) / ZOOM_MS;
+    if (zm.was && zt < 1 && !reduced()) {
+      const e = ease(zt);
+      const z = lerp(zm.from, zm.at, e);
+      const scratch = (zm.scratch ??= document.createElement("canvas"));
+      if (scratch.width !== c.width || scratch.height !== c.height) {
+        scratch.width = c.width;
+        scratch.height = c.height;
+      }
+      const sg = scratch.getContext("2d")!;
+      sg.globalCompositeOperation = "copy";
+      sg.drawImage(c, 0, 0);
+      const cx = c.width / 2;
+      const cy = c.height / 2;
+      const bring = (img: HTMLCanvasElement, k: number, alpha: number) => {
+        field.globalAlpha = alpha;
+        field.drawImage(img, cx - cx * k, cy - cy * k, c.width * k, c.height * k);
+      };
+      field.save();
+      field.setTransform(1, 0, 0, 1, 0, 0);
+      field.globalCompositeOperation = "source-over";
+      field.fillStyle = "#090c10";
+      field.fillRect(0, 0, c.width, c.height);
+      bring(scratch, z / zm.at, 1);
+      bring(zm.was, z / zm.from, 1 - e);
+      field.restore();
+    }
+  }
+
+  // The view's scale and where the kids sit in it: a tile as big as the field allows, times the zoom.
+  function lay(width: number, height: number) {
+    // The kids in the middle of the view, the past running off to the west and the future's haze to the east; on a narrow screen
+    // more of the past goes, so the kids stay big.
+    const span = P + F + R;
+    const fit = clamp(Math.min((width - 24) / (F + R + P * (width < 600 ? 0.25 : 0.45)), (height - 40) / (span / 2 + 1.4)), 8, 44);
+    const z = zoom.current.at;
+    const A = fit * z;
+    view.current = { w: width, h: height, A, z, OX: width / 2 + (R / 2) * A, OY: height / 2 - (R / 4) * A + 0.4 * A };
+  }
+
+  // A step nearer (1) or further (-1), eased from the view as it is now, and said for a moment.
+  function zoomBy(step: number) {
+    const zm = zoom.current;
+    const next = ZOOMS[clamp(ZOOMS.indexOf(zm.at) + step, 0, ZOOMS.length - 1)];
+    if (next === zm.at) return;
+    const c = canvas.current;
+    if (c?.width) {
+      const was = (zm.was ??= document.createElement("canvas"));
+      was.width = c.width;
+      was.height = c.height;
+      was.getContext("2d")!.drawImage(c, 0, 0);
+    }
+    const t = performance.now();
+    const e = ease((t - zm.since) / ZOOM_MS);
+    zm.from = lerp(zm.from, zm.at, e);
+    zm.at = next;
+    zm.since = t;
+    lay(view.current.w, view.current.h);
+    placed.current = null;
+    setZoomed((was) => ({ level: next, n: (was?.n ?? 0) + 1 }));
   }
 
   useEffect(() => {
@@ -2593,11 +2707,7 @@ export function Field(props: Props) {
       DPR = ratioFor(width);
       c.width = Math.round(width * DPR);
       c.height = Math.round(height * DPR);
-      // The kids in the middle of the view, the past running off to the west and the future's haze to the east; on a narrow screen
-      // more of the past goes, so the kids stay big.
-      const span = P + F + R;
-      const A = clamp(Math.min((width - 24) / (F + R + P * (width < 600 ? 0.25 : 0.45)), (height - 40) / (span / 2 + 1.4)), 8, 44);
-      view.current = { w: width, h: height, A, OX: width / 2 + (R / 2) * A, OY: height / 2 - (R / 4) * A + 0.4 * A };
+      lay(width, height);
       // Resizing clears the canvas, so a paused field is drawn again at once.
       draw();
     };
@@ -2607,6 +2717,43 @@ export function Field(props: Props) {
     const observer = new ResizeObserver(resize);
     observer.observe(el);
     resize();
+
+    // Zoom by the mouse wheel or a trackpad: a step a notch (a trackpad's pinch comes as small steps with ctrl held), and the
+    // wheel rests while a flick runs on, so one flick is one step. Safari's trackpad pinch comes as gestures instead; a pinch on
+    // the screen is the pointers' (below).
+    let spun = 0;
+    let rest = 0;
+    let spread = 1;
+    const wheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const t = performance.now();
+      if (t < rest) {
+        rest = t + 250;
+        spun = 0;
+        return;
+      }
+      spun += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      if (Math.abs(spun) < (e.ctrlKey ? 10 : 40)) return;
+      zoomBy(spun < 0 ? 1 : -1);
+      spun = 0;
+      rest = t + 400;
+    };
+    const gesture = (e: Event) => {
+      e.preventDefault();
+      if (touches.current.size >= 2) return;
+      const scale = (e as Event & { scale: number }).scale;
+      if (e.type === "gesturestart") spread = 1;
+      else if (scale / spread > 1.3) {
+        zoomBy(1);
+        spread = scale;
+      } else if (scale / spread < 0.77) {
+        zoomBy(-1);
+        spread = scale;
+      }
+    };
+    el.addEventListener("wheel", wheel, { passive: false });
+    el.addEventListener("gesturestart", gesture);
+    el.addEventListener("gesturechange", gesture);
 
     // The field rests while nobody can see it: scrolled away, behind the result at the end, or under a dialog.
     let frame = 0;
@@ -2640,6 +2787,9 @@ export function Field(props: Props) {
     return () => {
       observer.disconnect();
       sight.disconnect();
+      el.removeEventListener("wheel", wheel);
+      el.removeEventListener("gesturestart", gesture);
+      el.removeEventListener("gesturechange", gesture);
       removeEventListener("scroll", moved, { capture: true });
       removeEventListener("resize", moved);
       cancelAnimationFrame(frame);
@@ -2661,22 +2811,58 @@ export function Field(props: Props) {
       style={{ touchAction: "none" }}
       onPointerDown={(e) => {
         if (e.pointerType === "mouse") return;
-        aiming.current = true;
+        touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
         tapped.current = true;
-        hover.current = { x: e.clientX, y: e.clientY };
         e.currentTarget.setPointerCapture(e.pointerId);
+        // A second finger makes it a pinch, never an aim.
+        if (touches.current.size >= 2) {
+          const [a, b] = [...touches.current.values()];
+          pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1 };
+          pinched.current = true;
+          aiming.current = false;
+          hover.current = null;
+          return;
+        }
+        aiming.current = true;
+        hover.current = { x: e.clientX, y: e.clientY };
       }}
       onPointerMove={(e) => {
+        if (touches.current.has(e.pointerId)) touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        // Pinching: a step nearer each time the fingers spread a third further apart, a step further as they close as much.
+        if (pinch.current && touches.current.size >= 2) {
+          const [a, b] = [...touches.current.values()];
+          const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+          if (d / pinch.current.d > 1.3) {
+            zoomBy(1);
+            pinch.current.d = d;
+          } else if (d / pinch.current.d < 0.77) {
+            zoomBy(-1);
+            pinch.current.d = d;
+          }
+          return;
+        }
         if (e.pointerType !== "mouse" && !aiming.current) return;
         hover.current = { x: e.clientX, y: e.clientY };
       }}
       onPointerUp={(e) => {
-        if (e.pointerType === "mouse" || !aiming.current) return;
+        if (e.pointerType === "mouse") return;
+        touches.current.delete(e.pointerId);
+        if (touches.current.size < 2) pinch.current = null;
+        if (pinched.current) {
+          if (!touches.current.size) pinched.current = false;
+          aiming.current = false;
+          hover.current = null;
+          return;
+        }
+        if (!aiming.current) return;
         aiming.current = false;
         hover.current = null;
         place(e.clientX, e.clientY);
       }}
-      onPointerCancel={() => {
+      onPointerCancel={(e) => {
+        touches.current.delete(e.pointerId);
+        if (touches.current.size < 2) pinch.current = null;
+        if (!touches.current.size) pinched.current = false;
         aiming.current = false;
         hover.current = null;
       }}
@@ -2692,6 +2878,11 @@ export function Field(props: Props) {
       }}
     >
       <canvas ref={canvas} role="img" aria-label="The field: the frightened kids with the lantern, heading east, are the price, north is up" />
+      {zoomed && (
+        <span key={zoomed.n} className="zoomed" role="status">
+          {Math.round(zoomed.level * 100)}%
+        </span>
+      )}
     </div>
   );
 }
