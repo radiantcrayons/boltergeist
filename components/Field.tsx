@@ -546,6 +546,26 @@ function forest(ry: number) {
 const SEE_THROUGH = 0.25;
 // Words on the ground, bigger than they'd be drawn at the field's scale alone, so they stay easy to read.
 const WORDS = 1.45;
+// The field's own black, as the page has it behind the canvas, and the words over it while there's no price yet: the whole of it at
+// strength 1, less as the field fades in (how long that takes, ms).
+const VOID = "#090c10";
+const LIGHT_UP = 700;
+function dark(ctx: Ctx, w: number, h: number, strength: number) {
+  ctx.save();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = strength;
+  ctx.fillStyle = VOID;
+  ctx.fillRect(0, 0, w, h);
+  // (its dots counting one, two, three as it waits)
+  const dots = reduced() ? 3 : 1 + (Math.floor(performance.now() / 450) % 3);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.86)";
+  ctx.font = `${w < 600 ? 17 : 20}px ${DISPLAY}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`WAITING FOR THE PRICE${".".repeat(dots)}`.padEnd(24, " "), w / 2, h / 2);
+  ctx.restore();
+}
 // How near the view is: half as near, as it opens, or twice as near; and how long it takes to go from one to the next.
 const ZOOMS = [0.5, 1, 2];
 const ZOOM_MS = 260;
@@ -1163,6 +1183,8 @@ export function Field(props: Props) {
   const fades = useRef(new Map<string, number>());
   const seeThrough = useRef(new Map<string, number>());
   const fadeAt = useRef(0);
+  // When the field was first drawn after the black (0 while there's no price): it fades in from then.
+  const lit = useRef(0);
   // Where each rival is shown, gliding after where they really are when they move.
   const glides = useRef(new Map<string, number>());
   const appears = useRef(new Map<string, number>());
@@ -1313,22 +1335,11 @@ export function Field(props: Props) {
 
     const last = candles[candles.length - 1];
     const target = mark ?? last?.c;
-    // The sky only shows until there's a price: then the ground covers the whole view.
+    // Until there's a price there's nothing to draw the field from: its own black, and a word in the middle of it saying so. Once
+    // there is, the field fades in out of the black.
     if (target === undefined || !last) {
-      const sky = ctx.createLinearGradient(0, 0, 0, v.h);
-      sky.addColorStop(0, css(CLAY.skyTop));
-      sky.addColorStop(0.62, css(mix(CLAY.skyTop, CLAY.haze, 0.75)));
-      sky.addColorStop(1, css(CLAY.haze));
-      ctx.fillStyle = sky;
-      ctx.fillRect(0, 0, v.w, v.h);
-      const glow = ctx.createRadialGradient(v.w / 2, v.h / 2, 0, v.w / 2, v.h / 2, Math.max(v.w, v.h) * 0.75);
-      glow.addColorStop(0, css(CLAY.glow, 0.55));
-      glow.addColorStop(1, css(CLAY.glow, 0));
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, v.w, v.h);
-      ctx.fillStyle = "#3b4652";
-      ctx.font = `13px ${DISPLAY}`;
-      ctx.fillText("WAITING FOR THE PRICE...", 16, v.h / 2);
+      dark(ctx, v.w, v.h, 1);
+      lit.current = 0;
       return;
     }
 
@@ -2662,6 +2673,11 @@ export function Field(props: Props) {
       bring(zm.was, z / zm.from, 1 - e);
       field.restore();
     }
+
+    // Coming in out of the black: from the end of the first frame drawn, the slow one, so the fade runs whole.
+    if (!lit.current) lit.current = performance.now();
+    const left = 1 - ease((at - lit.current) / LIGHT_UP);
+    if (left > 0.002) dark(field, v.w, v.h, left);
   }
 
   // The view's scale and where the kids sit in it: a tile as big as the field allows, times the zoom.
@@ -2718,25 +2734,32 @@ export function Field(props: Props) {
     observer.observe(el);
     resize();
 
-    // Zoom by the mouse wheel or a trackpad: a step a notch (a trackpad's pinch comes as small steps with ctrl held), and the
-    // wheel rests while a flick runs on, so one flick is one step. Safari's trackpad pinch comes as gestures instead; a pinch on
-    // the screen is the pointers' (below).
+    // Zoom by the mouse wheel or a trackpad (a trackpad's pinch comes as small steps with ctrl held). Each gesture is a step: the
+    // scroll after a step that keeps on coming the same way is that flick running on and goes by, but a pause makes the next a new
+    // gesture, and turning the other way is a new step at once. Safari's trackpad pinch comes as gestures instead; a pinch on the
+    // screen is the pointers' (below).
     let spun = 0;
-    let rest = 0;
+    let last = 0;
+    let went = 0;
+    let held = false;
     let spread = 1;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       const t = performance.now();
-      if (t < rest) {
-        rest = t + 250;
-        spun = 0;
-        return;
-      }
-      spun += e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-      if (Math.abs(spun) < (e.ctrlKey ? 10 : 40)) return;
-      zoomBy(spun < 0 ? 1 : -1);
+      const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
+      const pause = t - last > 150;
+      last = t;
+      if (!dy) return;
+      const way = dy < 0 ? 1 : -1;
+      if (pause || way !== went) held = false;
+      if (held) return;
+      if (pause || Math.sign(spun) !== Math.sign(dy)) spun = 0;
+      spun += dy;
+      if (Math.abs(spun) < (e.ctrlKey ? 10 : 30)) return;
+      zoomBy(way);
+      went = way;
+      held = true;
       spun = 0;
-      rest = t + 400;
     };
     const gesture = (e: Event) => {
       e.preventDefault();

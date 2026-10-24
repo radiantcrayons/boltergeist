@@ -38,6 +38,8 @@ import { Spirit } from "./Spirit";
 
 
 type Moment = { title: string; detail?: string; tone: "good" | "bad" | "plain"; scene?: Scene; n: number };
+// A line of what the field says along its foot, coloured by what it's about.
+type Line = { text: string; tone: "good" | "bad" | "flag" | "dim" };
 
 type Props = {
   game: Game;
@@ -311,6 +313,25 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const swing = me.call ? Math.max(-1, Math.min(1, walkAway / (me.call.stake * 0.5))) : 0;
   const heat = Math.round(Math.abs(swing) * 4);
   const glow = heat ? heatOf(swing < 0 ? ROSE : MINT, heat) : null;
+  // What the field says along its foot: what you can do now, the whole time (hints); and in their place for a few seconds,
+  // anything brief: Strike's word on something that didn't go through, or what's on its way to Strike while it is.
+  const hints: Line[] = me.out
+    ? [{ text: me.out.by === "ko" ? "you got busted" : "you were banished", tone: "bad" }, ...(game.over ? [] : [{ text: "watch the rest, or haunt again", tone: "dim" as const }])]
+    : game.over
+      ? []
+      : me.call
+        ? [
+            { text: `${me.call.side} ${me.call.power}x`, tone: me.call.side === "long" ? "good" : "bad" },
+            { text: `click ${me.call.side === "long" ? "above" : "below"} them for a thundercloud`, tone: "flag" },
+          ]
+        : [
+            trap?.side === "short" ? { text: "click below them for a thundercloud", tone: "flag" } : { text: `click below them to ${trap ? "move your graves" : "go long"}`, tone: "good" },
+            trap?.side === "long" ? { text: "click above them for a thundercloud", tone: "flag" } : { text: `click above them to ${trap ? "move your graves" : "go short"}`, tone: "bad" },
+          ];
+  const [heard, setHeard] = useState<{ text: string; at: number } | null>(null);
+  if (war.error && war.error !== heard?.text) setHeard({ text: war.error, at: nowMs });
+  else if (!war.error && heard) setHeard(null);
+  const brief = war.busy ? { text: war.busy, tone: "busy" } : heard && nowMs - heard.at < BRIEF_MS ? { text: heard.text, tone: "bad" } : null;
   const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => roundEnds(game, r));
   // What's next on the clock: the start in the lobby, then each new round, then the final bell.
   const nextAt = waiting ? game.startsAt : (steps.find((t) => t > nowMs) ?? game.endsAt);
@@ -403,10 +424,18 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             </div>
           </div>
         )}
-        {war.error && (
-          <p key={war.error} className="toast" role="alert">
-            {war.error}
-          </p>
+        {(brief || hints.length > 0) && (
+          <div className={`say ${brief ? `brief ${brief.tone}` : me.call || me.out ? "" : "two"}`} role="status" aria-live="polite">
+            {brief ? (
+              <span key={brief.text}>{brief.text}</span>
+            ) : (
+              hints.map((line) => (
+                <span key={line.text} className={line.tone}>
+                  {line.text}
+                </span>
+              ))
+            )}
+          </div>
         )}
       </section>
 
@@ -442,47 +471,25 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
 
         <div className="orders">
           {me.out ? (
-            <div className="out">
-              <b>{me.out.by === "ko" ? "you got busted" : "you were banished"}</b>
-              <span className="dim">{game.over ? "" : "watch the rest, or"}</span>
-              <button className="plain" onClick={onAgain}>
-                haunt again
-              </button>
-            </div>
-          ) : war.busy ? (
-            <div className="sending">{war.busy}</div>
+            <button className="plain" onClick={onAgain}>
+              haunt again
+            </button>
           ) : me.call ? (
-            <>
-              <div className="in">
-                <span className={me.call.side === "long" ? "good" : "bad"}>
-                  {me.call.side} {me.call.power}x
-                </span>
-                <span className="flag">click {me.call.side === "long" ? "above" : "below"} them for a thundercloud</span>
-              </div>
-              <button
-                className={`order bank ${glow ? "hot" : ""}`}
-                style={glow ?? undefined}
-                onClick={bank}
-                disabled={!can}
-                title={`What you walk away with if you give up now, after every fee: Strike's fee to get in and ${fmt.money(bankFee)} for closing at the market. Hold on and a thundercloud pays you instead (space)`}
-              >
-                <span>give up the ghost</span>
-                <small>{fmt.money(walkAway, true)}</small>
-              </button>
-            </>
-          ) : game.over ? null : (
-            <>
-              <div className="in hints">
-                {trap?.side === "short" ? <span className="flag">click below them for a thundercloud</span> : <span className="good">click below them to {trap ? "move your graves" : "go long"}</span>}
-                {trap?.side === "long" ? <span className="flag">click above them for a thundercloud</span> : <span className="bad">click above them to {trap ? "move your graves" : "go short"}</span>}
-              </div>
-              {trap && (
-                <button className="plain clear" onClick={() => war.pull(game.id)} disabled={!!war.busy} title="Take your graves and any thundercloud away, to dig on the other side (Esc)">
-                  clear graves
-                </button>
-              )}
-            </>
-          )}
+            <button
+              className={`order bank ${glow ? "hot" : ""}`}
+              style={glow ?? undefined}
+              onClick={bank}
+              disabled={!can}
+              title={`What you walk away with if you give up now, after every fee: Strike's fee to get in and ${fmt.money(bankFee)} for closing at the market. Hold on and a thundercloud pays you instead (space)`}
+            >
+              <span>give up the ghost</span>
+              <small>{fmt.money(walkAway, true)}</small>
+            </button>
+          ) : trap && !game.over ? (
+            <button className="plain clear" onClick={() => war.pull(game.id)} disabled={!!war.busy} title="Take your graves and any thundercloud away, to dig on the other side (Esc)">
+              clear graves
+            </button>
+          ) : null}
         </div>
       </section>
     </main>
@@ -567,6 +574,8 @@ const FEARS = ["whisper", "howl", "shriek"];
 // How many graves each digs, and so how many ghosts rise when they spring.
 const COUNTS = [4, 8, 12];
 const FEAR_TIPS = ["The least power this round allows: hardest to bust", "Halfway between", "The most power the market allows: the biggest swings"];
+// How long Strike's word on something that didn't go through stands in for the field's hints, ms.
+const BRIEF_MS = 5000;
 // How far back the game server's copy of the price can be: Strike's price a few seconds old, kept by the server a moment more.
 const LATELY = 8000;
 

@@ -1099,6 +1099,7 @@ h2 {
 .orders {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   min-width: 300px;
 }
@@ -1165,61 +1166,6 @@ h2 {
   cursor: default;
 }
 
-.orders .in {
-  display: flex;
-  flex-direction: column;
-  font: 13px var(--mono), monospace;
-}
-
-.orders .in > span:first-child {
-  font: 22px var(--display), sans-serif;
-  text-transform: uppercase;
-}
-
-.orders .in.hints {
-  gap: 6px;
-}
-
-.orders .in.hints > span {
-  font: 17px var(--display), sans-serif;
-  text-transform: uppercase;
-}
-
-.orders .flag {
-  color: var(--volt);
-}
-
-.orders .out {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.orders .out b {
-  color: var(--rose);
-  font: 22px var(--display), sans-serif;
-}
-
-/* Strike's word when something didn't go through: a small note that slides up over the foot of the field, then fades. */
-.toast {
-  position: absolute;
-  left: 50%;
-  bottom: 14px;
-  z-index: 6;
-  max-width: min(560px, calc(100% - 32px));
-  margin: 0;
-  padding: 7px 14px;
-  background: rgba(9, 12, 16, 0.9);
-  border: 1px solid rgba(255, 77, 109, 0.45);
-  border-radius: 10px;
-  color: var(--rose);
-  font: 13px/1.4 var(--sans), sans-serif;
-  text-align: center;
-  pointer-events: none;
-  transform: translateX(-50%);
-  animation: toast 9s ease-out both;
-}
-
 /* Asked on the way out while graves or a position are live on Strike. */
 .leave {
   position: absolute;
@@ -1272,24 +1218,88 @@ h2 {
   cursor: pointer;
 }
 
-@keyframes toast {
-  0% {
+/* What the field says along its foot, in the middle: what you can do now, quietly, the whole time; and in its place for a few
+   seconds anything brief, Strike's word on something that didn't go through or what's on its way to Strike. Small, so it never
+   covers much of the play, and smaller on a phone. */
+.say {
+  position: absolute;
+  right: 0;
+  bottom: 12px;
+  left: 0;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 14px;
+  width: fit-content;
+  max-width: min(640px, calc(100% - 150px));
+  margin: 0 auto;
+  padding: 6px 14px;
+  background: rgba(9, 12, 16, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  color: var(--soft);
+  font: 14px/1.35 var(--display), sans-serif;
+  letter-spacing: 0.02em;
+  text-align: center;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* (the two ways to click, one over the other, the box no wider than the longer) */
+.say.two {
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.say .good {
+  color: var(--mint);
+}
+
+.say .bad {
+  color: var(--rose);
+}
+
+.say .flag {
+  color: var(--volt);
+}
+
+.say .dim {
+  color: var(--soft);
+}
+
+.say.brief {
+  font: 13px/1.4 var(--sans), sans-serif;
+  letter-spacing: 0;
+  text-transform: none;
+  animation: say-in 0.2s ease-out;
+}
+
+.say.brief.bad {
+  border-color: rgba(255, 77, 109, 0.45);
+  color: var(--rose);
+}
+
+.say.brief.busy {
+  border-color: rgba(255, 225, 74, 0.35);
+  color: var(--volt);
+}
+
+.say.brief.busy span {
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes say-in {
+  from {
     opacity: 0;
-    transform: translate(-50%, 12px);
-  }
-  4%,
-  85% {
-    opacity: 1;
-    transform: translate(-50%, 0);
-  }
-  100% {
-    opacity: 0;
-    transform: translate(-50%, 0);
+    transform: translateY(8px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .toast {
+  .say.brief,
+  .say.brief.busy span {
     animation: none;
   }
 }
@@ -2302,13 +2312,6 @@ h2 {
   vertical-align: middle;
 }
 
-.sending {
-  padding: 18px 24px;
-  color: var(--volt);
-  font: 22px var(--display), sans-serif;
-  animation: pulse 0.8s ease-in-out infinite;
-}
-
 .warning.bad {
   color: var(--rose);
   animation: none;
@@ -2438,6 +2441,22 @@ h2 {
   .back svg {
     width: 24px;
     height: 24px;
+  }
+
+  .say {
+    bottom: 8px;
+    gap: 0 10px;
+    max-width: calc(100% - 20px);
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .say.brief {
+    font-size: 12px;
+  }
+
+  .chart .zoomed {
+    bottom: 52px;
   }
 
   .banner {
