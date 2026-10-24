@@ -463,23 +463,52 @@ function kidsTorch3(bob: number): { hand: V; tip: V } {
   return { hand, tip: [hand[0] + d[0] * 1.9, hand[1] + d[1] * 1.9, hand[2] + d[2] * 1.9] };
 }
 
-// A child: legs and arms swinging unless a hand is holding on somewhere, head turned a little, eyes wide and mouth open.
-function child(k: Child, phase: number, reach: (V | null)[]): Part[] {
+// A child: legs and arms swinging unless a hand is holding on somewhere, head turned a little, eyes wide and mouth open. With
+// lightning going through them, the same child as their bones alone, flat white the way an x-ray shows them, on the same joints.
+const BONE: RGB = [236, 240, 246];
+function child(k: Child, phase: number, reach: (V | null)[], xray = false): Part[] {
   const parts: Part[] = [];
   const s = k.tall / 15;
   const [x, y] = k.at;
   const swing = Math.sin(phase);
   const bob = Math.abs(Math.cos(phase)) * 0.3 * s;
   const hip = 4.2 * s + bob;
+  const os = (a: V, b: V, w: number): Part => ({ ...bone(a, b, w * s, BONE), glow: true });
+  const knob = (c: V, r: number): Part => ({ ...part(c, [r * s, r * s, r * s], BONE), glow: true });
+  const mid = (a: V, b: V): V => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
   for (const side of [-1, 1]) {
-    const leg = limb([x, y + side * 0.85 * s, hip], 3.9 * s, 0.75 * s, swing * side * 0.5, k.legs);
-    parts.push(leg.part, part([leg.end[0] + 0.45 * s, leg.end[1], Math.max(0.62 * s, leg.end[2] + 0.2 * s)], [1.05 * s, 0.78 * s, 0.62 * s], SHOES));
+    const from: V = [x, y + side * 0.85 * s, hip];
+    const leg = limb(from, 3.9 * s, 0.75 * s, swing * side * 0.5, k.legs);
+    if (xray) parts.push(os(from, leg.end, 0.26), knob(mid(from, leg.end), 0.36), os(leg.end, [leg.end[0] + 0.9 * s, leg.end[1], Math.max(0.3 * s, leg.end[2])], 0.24));
+    else parts.push(leg.part, part([leg.end[0] + 0.45 * s, leg.end[1], Math.max(0.62 * s, leg.end[2] + 0.2 * s)], [1.05 * s, 0.78 * s, 0.62 * s], SHOES));
   }
-  parts.push(part([x - 0.1 * s, y, hip + 0.8 * s], [1.9 * s, 2.15 * s, 1.5 * s], k.top));
-  parts.push(part([x, y, hip + 2.9 * s], [1.7 * s, 1.95 * s, 2.1 * s], k.top));
+  if (xray) {
+    // A pelvis, a spine up to the skull, three ribs a side curving round from it to the front, and a collarbone across.
+    parts.push({ ...part([x - 0.1 * s, y, hip + 0.45 * s], [0.8 * s, 1.45 * s, 0.5 * s], BONE), glow: true }, os([x - 0.35 * s, y, hip + 0.5 * s], [x - 0.15 * s, y, 9.4 * s + bob], 0.24));
+    for (const z of [2.1, 2.8, 3.5]) {
+      for (const side of [-1, 1]) {
+        const rib: V[] = [
+          [x - 0.35 * s, y + side * 0.2 * s, hip + z * s],
+          [x + 0.25 * s, y + side * 1.45 * s, hip + (z - 0.15) * s],
+          [x + 1.05 * s, y + side * 0.95 * s, hip + (z - 0.35) * s],
+          [x + 1.3 * s, y + side * 0.2 * s, hip + (z - 0.45) * s],
+        ];
+        parts.push(...chain(rib, 0.17 * s, 0.14 * s, BONE, true));
+      }
+    }
+    parts.push(os(shoulderOf(k, -1, bob), shoulderOf(k, 1, bob), 0.2));
+  } else {
+    parts.push(part([x - 0.1 * s, y, hip + 0.8 * s], [1.9 * s, 2.15 * s, 1.5 * s], k.top));
+    parts.push(part([x, y, hip + 2.9 * s], [1.7 * s, 1.95 * s, 2.1 * s], k.top));
+  }
   [-1, 1].forEach((side, i) => {
     const from = shoulderOf(k, side, bob);
     const to = reach[i];
+    if (xray) {
+      const hand = to ?? limb(from, 3.6 * s, 0.6 * s, -swing * side * 0.45, k.top).end;
+      parts.push(os(from, hand, 0.22), knob(mid(from, hand), 0.3), knob(hand, 0.36));
+      return;
+    }
     if (to) {
       parts.push(bone(from, to, 0.6 * s, k.top), part(to, [0.62 * s, 0.62 * s, 0.62 * s], KID_SKIN));
       return;
@@ -487,17 +516,22 @@ function child(k: Child, phase: number, reach: (V | null)[]): Part[] {
     const arm = limb(from, 3.6 * s, 0.6 * s, -swing * side * 0.45, k.top);
     parts.push(arm.part, part(arm.end, [0.62 * s, 0.62 * s, 0.62 * s], KID_SKIN));
   });
-  parts.push(...head(k, [x + 0.25 * s, y, 11.9 * s + bob]));
+  parts.push(...head(k, [x + 0.25 * s, y, 11.9 * s + bob], xray));
   return parts;
 }
 
-function head(k: Child, hc: V): Part[] {
+function head(k: Child, hc: V, xray = false): Part[] {
   const s = k.tall / 15;
   const m = yaw(k.turn);
   const bit = (dx: number, dy: number, dz: number, a: number, b: number, c: number, color: RGB) => {
     const o = turned(m, [dx * s, dy * s, dz * s]);
     return part([hc[0] + o[0], hc[1] + o[1], hc[2] + o[2]], [a * s, b * s, c * s], color, m);
   };
+  // The skull: a dome and a jaw, its sockets, nose and the gap between its teeth dark.
+  if (xray) {
+    const dark = [bit(1.85, -0.95, 0.1, 0.6, 0.68, 0.75, HOLLOW), bit(1.85, 0.95, 0.1, 0.6, 0.68, 0.75, HOLLOW), bit(2.3, 0, -0.75, 0.28, 0.3, 0.42, HOLLOW), bit(2.05, 0, -1.5, 0.22, 1.05, 0.16, HOLLOW)];
+    return [{ ...bit(0.1, 0, 0.15, 2.35, 2.45, 2.4, BONE), glow: true }, { ...bit(0.95, 0, -1.65, 1.25, 1.55, 0.85, BONE), glow: true }, ...dark];
+  }
   const parts = [bit(0, 0, 0, 2.75, 2.85, 2.75, KID_SKIN), bit(-0.45, 0, 0.45, 2.75, 2.95, 2.65, k.hair)];
   if (k.style === "hat") parts.push(bit(-0.2, 0, 1.6, 2.85, 2.95, 1.9, HAT), bit(-0.1, 0, 1.05, 2.95, 3.05, 0.55, SHINE), bit(-0.4, 0, 3.6, 0.8, 0.8, 0.8, SHINE));
   else parts.push(bit(1.6, 0, 1.7, 1.2, 2.3, 0.8, k.hair));
@@ -517,7 +551,7 @@ const about = (k: Child, v: V, turn: number): V => {
 const turnedAbout = (k: Child, parts: Part[], turn: number): Part[] =>
   turn ? parts.map((q) => ({ ...q, c: about(k, q.c, turn), m: times(yaw(turn), q.m) })) : parts;
 
-function kids(stride: number, strides: number, turn = 0): Part[] {
+function kids(stride: number, strides: number, turn = 0, xray = false): Part[] {
   const phase = (stride / strides) * Math.PI * 2;
   const [eldest, middle, youngest] = CHILDREN;
   const bob = (k: Child) => Math.abs(Math.cos(phase + k.lag)) * 0.3 * (k.tall / 15);
@@ -535,16 +569,16 @@ function kids(stride: number, strides: number, turn = 0): Part[] {
   ];
   const beam: Part[] = [bone(torch.hand, torch.tip, 0.4, TORCH), { ...part(torch.tip, [0.46, 0.46, 0.46], LAMP), glow: true }];
   return [
-    ...turnedAbout(eldest, [...child(eldest, phase, [null, hand]), ...lantern], turn),
-    ...turnedAbout(middle, [...child(middle, phase + middle.lag, [reachFor(middle, eldest, [sleeve[0] - 0.4, sleeve[1] + 0.6, sleeve[2] - 1.2]), torch.hand]), ...beam], turn),
-    ...turnedAbout(youngest, child(youngest, phase + youngest.lag, [reachFor(youngest, middle, [elbow[0] - 0.2, elbow[1] + 0.6, elbow[2] - 1.8]), null]), turn),
+    ...turnedAbout(eldest, [...child(eldest, phase, [null, hand], xray), ...(xray ? [] : lantern)], turn),
+    ...turnedAbout(middle, [...child(middle, phase + middle.lag, [reachFor(middle, eldest, [sleeve[0] - 0.4, sleeve[1] + 0.6, sleeve[2] - 1.2]), torch.hand], xray), ...(xray ? [] : beam)], turn),
+    ...turnedAbout(youngest, child(youngest, phase + youngest.lag, [reachFor(youngest, middle, [elbow[0] - 0.2, elbow[1] + 0.6, elbow[2] - 1.8]), null], xray), turn),
   ];
 }
 
 // Each turned by an angle about the up axis where they stand: east as they walk, toward the south for a positive turn and the
-// north for a negative one.
-export const paintKids = (px: number, stride: number, strides: number, turn = 0): Figure =>
-  turn ? render(kids(stride, strides, turn), px, 19, 18, 36) : render(kids(stride, strides), px, 19, 15, 33);
+// north for a negative one. Their bones alone (xray) come out the same size, so they lie exactly over the kids' own picture.
+export const paintKids = (px: number, stride: number, strides: number, turn = 0, xray = false): Figure =>
+  turn ? render(kids(stride, strides, turn, xray), px, 19, 18, 36) : render(kids(stride, strides, 0, xray), px, 19, 15, 33);
 
 // The torch's lens from the children's feet, in pixels, for its beam.
 export function kidsTorch(px: number, turn = 0) {

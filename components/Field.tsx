@@ -15,6 +15,8 @@ export type Yours = {
   trap?: { side: Side; price: number; at: number; power: number; count: number; ahead?: number };
   call?: { side: Side; entry: number; at: number; power: number; count: number; maker: boolean; koAt: number; move: number };
   flag?: { price: number; banks?: number; ahead?: number };
+  // How your last call ended, and when: at your thundercloud, busted, or given up at the market.
+  end?: { by: "cloud" | "bust" | "hand"; at: number };
 };
 
 type Props = {
@@ -37,8 +39,8 @@ type Props = {
   onPick?: (p: number) => void;
 };
 
-// Where the ground came from: where you got in, and where you got out.
-type Past = { at: number; price: number; side: Side; kind: "in" | "taken" | "out" };
+// Where the ground came from: where you got in, and where you got out, with the call's price and ghosts for a bust.
+type Past = { at: number; price: number; side: Side; kind: "in" | "taken" | "out" | "bust"; entry?: number; count?: number };
 // One of Strike's biggest orders, a hand out of the ground in the candle the kids were in: when it rose, when it went, whether it stays.
 type Hand = { col: number; row: number; side: Side; usd: number; reach: number; head: boolean; kept: boolean; born: number; gone: number; seed: number };
 
@@ -542,6 +544,7 @@ const turnTo = (from: number, to: number, dt: number, { ease, rate }: { ease: nu
 };
 const kidsKey = (px: number, stride: number, turn: number) => `kids|${px}|${stride}|${turn}`;
 const kidsAt = (px: number, stride: number, turn = KID_TURNS / 2) => figure(kidsKey(px, stride, turn), () => paintKids(px, stride, STRIDES, kidTurn(turn)));
+const bonesAt = (px: number, stride: number, turn: number) => figure(`bones|${px}|${stride}|${turn}`, () => paintKids(px, stride, STRIDES, kidTurn(turn), true));
 const ghostKey = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn: number) => `ghost|${kind}|${body}|${px}|${frame}|${boo ? 1 : 0}|${turn}`;
 const ghostAt = (kind: GhostKind, body: RGB, px: number, frame: number, boo: boolean, turn = 0) =>
   figure(ghostKey(kind, body, px, frame, boo, turn), () => paintSpook(kind, body, px, frame, FRAMES, boo, turn));
@@ -566,6 +569,18 @@ function kidsSoon(px: number, turn: number) {
     const key = kidsKey(px, stride, turn);
     if (figures.has(key) || toBake.has(key)) continue;
     toBake.set(key, () => paintKids(px, stride, STRIDES, kidTurn(turn)));
+  }
+  if (toBake.size && !baking) {
+    baking = true;
+    idle(bake);
+  }
+}
+// While your thundercloud waits over a call, the kids' bones are made between frames for the way they face, ready for the strike.
+function bonesSoon(px: number, turn: number) {
+  for (let stride = 0; stride < STRIDES; stride++) {
+    const key = `bones|${px}|${stride}|${turn}`;
+    if (figures.has(key) || toBake.has(key)) continue;
+    toBake.set(key, () => paintKids(px, stride, STRIDES, kidTurn(turn), true));
   }
   if (toBake.size && !baking) {
     baking = true;
@@ -1026,10 +1041,15 @@ function merged(list: Box[], W: number, H: number): Box[] {
 type Shape = { c: HTMLCanvasElement; ox: number; oy: number; w: number; h: number };
 type Caster = { x: number; y: number; z?: number; tall?: number; grove?: boolean; shape: () => Shape };
 const shapeOf = (f: Figure, dpr: number): Shape => ({ c: f.canvas, ox: f.ox / dpr, oy: f.oy / dpr, w: f.w / dpr, h: f.h / dpr });
-// A figure's shape in danger red, made once per picture, laid over a ghost to flash it as a call goes wrong.
-const reds = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>();
-function redOf(c: HTMLCanvasElement) {
-  const was = reds.get(c);
+// A figure's shape in one flat colour, made once per picture: danger red laid over a ghost to flash it as a call goes wrong, and
+// charred black for the kids as lightning goes through them.
+const RED = "rgb(255, 60, 84)";
+const CHARRED = "rgb(12, 10, 18)";
+const tints = new Map<string, WeakMap<HTMLCanvasElement, HTMLCanvasElement>>();
+function tintOf(c: HTMLCanvasElement, color: string) {
+  let made = tints.get(color);
+  if (!made) tints.set(color, (made = new WeakMap()));
+  const was = made.get(c);
   if (was) return was;
   const r = document.createElement("canvas");
   r.width = c.width;
@@ -1037,11 +1057,15 @@ function redOf(c: HTMLCanvasElement) {
   const g = r.getContext("2d")!;
   g.drawImage(c, 0, 0);
   g.globalCompositeOperation = "source-in";
-  g.fillStyle = "rgb(255, 60, 84)";
+  g.fillStyle = color;
   g.fillRect(0, 0, r.width, r.height);
-  reds.set(c, r);
+  made.set(c, r);
   return r;
 }
+// Struck by your thundercloud, the kids are electrocuted for ZAP_MS: they freeze and shake, flickering between themselves and their
+// bones. Busted, your ghosts flare red and spin and swirl up off the field over BUST_MS.
+const ZAP_MS = 1500;
+const BUST_MS = 1600;
 
 export function Field(props: Props) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -1058,6 +1082,10 @@ export function Field(props: Props) {
     hands: Map<string, Hand>;
     col: number;
     struck: number;
+    // The kids electrocuted: since when, and the stride and way round they froze in.
+    zap: { at: number; stride: number; pose: number } | null;
+    // How far round the beat your ghosts flash red to has come, and when it was last moved on.
+    beat: { phase: number; at: number };
     gait: { walked: number; y: number; price: number; at: number; aim: number; quiet: number; turn: number; pose: number; pace: number };
     rain: Float32Array | null;
   }>({
@@ -1068,6 +1096,8 @@ export function Field(props: Props) {
     hands: new Map(),
     col: 0,
     struck: 0,
+    zap: null,
+    beat: { phase: 0, at: 0 },
     gait: { walked: 0, y: 0, price: 0, at: 0, aim: 0, quiet: 0, turn: 0, pose: KID_TURNS / 2, pace: 1 },
     rain: null,
   });
@@ -1082,7 +1112,6 @@ export function Field(props: Props) {
   // The grass darkened by the rain, kept for the sheet and how wet it is.
   const soaked = useRef<{ c: HTMLCanvasElement | null; n: number; level: number }>({ c: null, n: -1, level: -1 });
   const hover = useRef<Pt | null>(null);
-  const soft = useRef<HTMLCanvasElement | null>(null);
   // How far into view each tall thing has faded, by its tile, so nothing pops in or out.
   const fades = useRef(new Map<string, number>());
   const seeThrough = useRef(new Map<string, number>());
@@ -1333,8 +1362,12 @@ export function Field(props: Props) {
     if (yours.flag && !m.summoned.has(yours.flag.price)) m.summoned.set(yours.flag.price, now);
     if (yours.call && (!m.call || m.call.at !== yours.call.at)) m.past.push({ at: yours.call.at, price: yours.call.entry, side: yours.call.side, kind: "in" });
     if (!yours.call && m.call) {
-      const taken = m.flag !== null && Math.abs(live - m.flag) <= Math.max(g.rowSize, tickSize * 3);
-      m.past.push({ at: now, price: taken ? m.flag! : live, side: m.call.side, kind: taken ? "taken" : "out" });
+      // How it ended, from the game's own word on it when that's for this call, or else from whether the kids were at the cloud.
+      const by = yours.end && yours.end.at >= m.call.at ? yours.end.by : null;
+      const near = m.flag !== null && Math.abs(live - m.flag) <= Math.max(g.rowSize, tickSize * 3);
+      const kind = by === "bust" ? "bust" : m.flag !== null && (by === "cloud" || (!by && near)) ? "taken" : "out";
+      m.past.push({ at: now, price: kind === "taken" ? m.flag! : live, side: m.call.side, kind, entry: m.call.entry, count: m.call.count });
+      if (kind === "taken") m.zap = { at: now, stride: -1, pose: -1 };
     }
     m.call = yours.call ?? null;
     m.flag = yours.flag?.price ?? null;
@@ -1342,6 +1375,21 @@ export function Field(props: Props) {
     // It rains the whole night through, and the only lightning is your thundercloud's.
     const wet = reduced() ? 0 : RAIN;
     for (const key of m.summoned.keys()) if (key !== m.flag) m.summoned.delete(key);
+    // How far your call has gone wrong: whether it's in a loss at all (half a row the wrong side of your ghosts is enough to show), and
+    // how far from your ghosts to the bust the kids have come. Your ghosts flash red with it to a beat that quickens from under one a
+    // second to two as the bust nears, and the edge of the view the bust lies past glows red.
+    let losing = 0;
+    let hurt = 0;
+    if (yours.call) {
+      const c = yours.call;
+      const wrong = c.side === "long" ? c.entry - live : live - c.entry;
+      losing = clamp(wrong / (g.rowSize * 0.5), 0, 1);
+      hurt = clamp(wrong / (Math.abs(c.entry - c.koAt) || 1), 0, 1);
+    }
+    const alarm = losing * (0.65 + 0.35 * hurt);
+    m.beat.phase = (m.beat.phase + (Math.min(at - (m.beat.at || at), 100) / 1000) * Math.PI * 2 * (0.7 + 1.3 * hurt)) % (Math.PI * 2);
+    m.beat.at = at;
+    const pulse = reduced() ? 0.6 : 0.5 + 0.5 * Math.sin(m.beat.phase);
 
     // The ground: one sheet of clay grass, moved with the field.
     const sheet = grassSheet(nowX, g.cy, ext);
@@ -1448,14 +1496,21 @@ export function Field(props: Props) {
     }
     stamp();
 
-    // A line across the ground where you'd be busted.
+    // A line across the ground where you'd be busted, in red with a cross along it, the ground past it stained red and glowing
+    // brighter to the beat the nearer the kids come; it glows through the dusk once that's down.
+    let bustLine: { y: number; x0: number } | null = null;
     if (yours.call && onMap(yOf(yours.call.koAt))) {
       const yk = yOf(yours.call.koAt);
-      line(ctx, S(Math.max(X(yours.call.at), ext.x0), yk), S(ext.x1, yk), css(CLAY.steelDark, 0.8), 1.4);
-      for (let a = Math.ceil((nowX + Math.max(X(yours.call.at), ext.x0)) * 2) / 2; a < nowX + ext.x1; a += 0.5) {
+      const x0 = Math.max(X(yours.call.at), ext.x0);
+      const beyond = yours.call.side === "long" ? ext.y1 + 1 : ext.y0 - 1;
+      poly(ctx, [S(x0, yk), S(ext.x1, yk), S(ext.x1, beyond), S(x0, beyond)], `rgba(255, 60, 84, ${0.14 + 0.16 * pulse * (0.3 + hurt)})`);
+      line(ctx, S(x0, yk), S(ext.x1, yk), "rgba(255, 77, 109, 0.95)", 2.6);
+      for (let a = Math.ceil((nowX + x0) * 2) / 2; a < nowX + ext.x1; a += 0.5) {
         const q = S(a - nowX, yk, 2);
-        line(ctx, { x: q.x - 3, y: q.y - 3 }, { x: q.x + 3, y: q.y + 3 }, css(CLAY.steelDark, 0.8), 1.2);
+        line(ctx, { x: q.x - 3.5, y: q.y - 3.5 }, { x: q.x + 3.5, y: q.y + 3.5 }, "rgba(255, 77, 109, 0.95)", 1.6);
+        line(ctx, { x: q.x - 3.5, y: q.y + 3.5 }, { x: q.x + 3.5, y: q.y - 3.5 }, "rgba(255, 77, 109, 0.95)", 1.6);
       }
+      bustLine = { y: yk, x0 };
     }
 
     for (const p of m.past) {
@@ -1658,19 +1713,23 @@ export function Field(props: Props) {
         play("strike");
       }
     }
-    // Lightning comes down on the kids where they walked into your cloud: its last strike, from the cloud itself, which then goes.
+    // Lightning comes down on the kids where they walked into your cloud: its last two strikes, from the cloud itself straight down
+    // into them, electrocuting them, and then the cloud goes.
     for (const p of m.past) {
-      if (p.kind !== "taken" || now - p.at > 1100) continue;
-      const t = (now - p.at) / 1100;
-      const kx = X(p.at);
-      const ky = yOf(p.price);
-      const q = S(kx, ky);
-      const cx = kx + CLOUD_OFF;
-      for (const cl of CLOUDS) fading.push({ x: cx + cl.dx, y: ky, alpha: 1 - t, size: cl.s });
-      if (t < 0.4 && !reduced()) {
-        glare.push({ x: kx, y: ky });
-        bolts.push(() => lightning3d(ctx, { x: cx + (kx - cx) * 0.35, y: ky, z: CLOUD_Z / A - 0.1 }, { x: kx, y: ky, z: 0 }, Math.round(p.at), A / 22, (pt) => S(pt.x, pt.y, pt.z * A)));
-      }
+      if (p.kind !== "taken" || now - p.at > ZAP_MS) continue;
+      const age = now - p.at;
+      const t = age / ZAP_MS;
+      const cy0 = yOf(p.price);
+      const cx = X(p.at) + CLOUD_OFF;
+      const q = S(-KIDS_BACK, ky);
+      for (const cl of CLOUDS) fading.push({ x: cx + cl.dx, y: cy0, alpha: 1 - t, size: cl.s });
+      [0, 520].forEach((off, n) => {
+        const a = age - off;
+        // Each stroke flickers: lit, dark a moment, lit again.
+        if (reduced() || a < 0 || !(a < 90 || (a > 130 && a < 240))) return;
+        glare.push({ x: -KIDS_BACK, y: ky });
+        bolts.push(() => lightning3d(ctx, { x: cx, y: cy0, z: CLOUD_Z / A - 0.1 }, { x: -KIDS_BACK, y: ky, z: 0 }, Math.round(p.at) + n * 17, A / 22, (pt) => S(pt.x, pt.y, pt.z * A)));
+      });
       flashes.push({ p: q, r: (1.2 + 2 * t) * A, rgb: "255, 232, 140", a: 0.8 * (1 - t) });
       bolts.push(() => {
         for (const r of [0.5, 1]) oval(ctx, q.x, q.y, (0.4 + 1.6 * t * r) * A, (0.2 + 0.8 * t * r) * A, undefined, `rgba(255, 236, 120, ${1 - t})`, 2);
@@ -1781,7 +1840,7 @@ export function Field(props: Props) {
     // A ghost floats a little above the ground, bobbing; its glow goes in with the dusk.
     const glows: Glow[] = [...lights];
     // A ghost's figure is made at size made and drawn at size s; rising, its frame is held so the few figures it needs are kept.
-    const spook = (x: number, y: number, side: Side, s: number, phase: number, alpha: number, boo: boolean, lift = 0, turn = 0, made = s, frame?: number, danger = 0) => {
+    const spook = (x: number, y: number, side: Side, s: number, phase: number, alpha: number, boo: boolean, lift = 0, turn = 0, made = s, frame?: number, red = 0) => {
       const z = (6 + Math.sin(phase) * 2.5) * s * k + lift;
       const f = ghostAt(kind, GHOSTS[side], Math.round(1.9 * made * k * dpr * 10) / 10, frame ?? Math.floor((((phase / (Math.PI * 2)) % 1) + 1) % 1 * FRAMES), boo, turn);
       const st = s / made / dpr;
@@ -1794,14 +1853,13 @@ export function Field(props: Props) {
         const p = S(x, y, z);
         ctx.globalAlpha = alpha;
         ctx.drawImage(f.canvas, p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
-        // Going wrong, they flash red, harder and faster the nearer the bust.
-        if (danger > 0.02) {
-          const beat = reduced() ? 0.6 : 0.5 + 0.5 * Math.sin(at / (240 - 150 * danger));
-          ctx.globalAlpha = alpha * Math.min(0.85, danger * (0.35 + 0.5 * beat));
-          ctx.drawImage(redOf(f.canvas), p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
+        // Going wrong, they flash red: red is how much of it is laid over them.
+        if (red > 0.02) {
+          ctx.globalAlpha = alpha * Math.min(0.9, red);
+          ctx.drawImage(tintOf(f.canvas, RED), p.x - f.ox * st, p.y - f.oy * st, f.w * st, f.h * st);
         }
         ctx.globalAlpha = 1;
-        glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, rgb: danger > 0.3 ? "255, 90, 110" : side === "long" ? "170, 240, 210" : "250, 190, 205", a: 0.32 });
+        glows.push({ p: { x: p.x, y: p.y - 16 * s * k }, r: 34 * s * k, rgb: red > 0.25 ? "255, 90, 110" : side === "long" ? "170, 240, 210" : "250, 190, 205", a: 0.32 + 0.18 * clamp((red - 0.25) / 0.4, 0, 1) });
       });
     };
     // A row of your ghosts on your line, keeping pace with the kids and centred on them: as many as your power calls for, as big as
@@ -1913,6 +1971,15 @@ export function Field(props: Props) {
         for (const { x, dy } of row(yours.trap.count)) for (let fr = 0; fr < FRAMES; fr++) ghostSoon(kind, body, px, fr, true, facing(x, ya + dy));
       }
     }
+    // While you're in, every turn of your ghost is made between frames too, for the spin they go up in if you're busted.
+    if (yours.call && !reduced()) {
+      const px = Math.round(1.9 * scale * k * dpr * 10) / 10;
+      const ask = `bust|${kind}|${px}|${yours.call.side}`;
+      if (asked.current !== ask) {
+        asked.current = ask;
+        for (let t = 0; t < ANGLES; t++) ghostSoon(kind, GHOSTS[yours.call.side], px, 0, true, t);
+      }
+    }
     if (yours.trap && !yours.call) {
       const ya = yOf(yours.trap.price);
       if (onMap(ya)) {
@@ -1926,10 +1993,8 @@ export function Field(props: Props) {
     if (yours.call) {
       const call = yours.call;
       const ya = yOf(call.entry);
-      // The further the kids walk on through your ghosts, the more of them they wear away: all gone at your bust price.
-      const wrong = call.side === "long" ? call.entry - live : live - call.entry;
-      const hurt = clamp(wrong / (Math.abs(call.entry - call.koAt) || 1), 0, 1);
-      const go = ease((now - call.at) / (call.maker ? 900 : 1600));
+      // The further the kids walk on through your ghosts, the more of them they wear away (hurt): all gone at your bust price.
+      const go =ease((now - call.at) / (call.maker ? 900 : 1600));
       spooked = call.maker ? 1 - clamp((now - call.at) / 1400, 0, 1) : 0;
       // Sprung: the graves sink as your ghosts swirl up out of them, wide and then tighter, before settling into their row.
       const rise = call.maker && !reduced() ? clamp((now - call.at) / 1800, 0, 1) : 1;
@@ -1958,11 +2023,55 @@ export function Field(props: Props) {
           const from = call.maker ? { x, y: ya + dy } : { x: x + 1.6, y: call.side === "long" ? R + 1 : -1 };
           const gx = lerp(from.x, x, go);
           const gy = lerp(from.y, ya + dy, go);
-          spook(gx, gy, call.side, scale, walk * 0.5 + j * 1.3, 0.95 - 0.7 * hurt, spooked > 0 || hurt < 0.05, 0, facing(gx, gy), scale, undefined, hurt);
+          spook(gx, gy, call.side, scale, walk * 0.5 + j * 1.3, 0.95 - 0.7 * hurt, spooked > 0 || hurt < 0.05, 0, facing(gx, gy), scale, undefined, alarm * (0.5 + 0.5 * pulse));
         });
       }
       const yk = yOf(call.koAt);
       if (onMap(yk)) labels.push(() => marking(`BUSTED ${fmt.price(call.koAt, tickSize)}`, 2, yk + (call.side === "long" ? 0.55 : -0.12), COLORS.down));
+    }
+    // Busted: the rise from the graves run backwards. Your ghosts flare red and are swept in off their row into one whirl round the
+    // middle of it, then spiral up it together and off the field, each spinning on its own axis faster and faster the other way round,
+    // shrinking and fading as it goes, with a trail of red wisps behind it and a red column of light up the whirl; from where they
+    // were if that's in view, else round the kids, who are where the bust is. A ring of red goes out over the ground from the kids and
+    // the whole field flushes red a moment.
+    let flush = 0;
+    for (const p of m.past) {
+      if (p.kind !== "bust" || now - p.at > BUST_MS) continue;
+      const t = (now - p.at) / BUST_MS;
+      const ya = p.entry !== undefined && onMap(yOf(p.entry)) ? yOf(p.entry) : ky;
+      const count = p.count ?? 4;
+      const cx = -KIDS_BACK;
+      // Each takes its own place round the whirl, evenly spaced, coming in to it from its place in the row.
+      const up = (x: number, dy: number, j: number, u: number) => {
+        const turn = (j / count) * Math.PI * 2 - u * u * Math.PI * 4;
+        const r = 1.6 * (1 - 0.4 * u);
+        const k = ease(u / 0.35);
+        return { x: lerp(x, cx + Math.cos(turn) * r, k), y: lerp(ya + dy, ya + Math.sin(turn) * r, k), lift: (0.4 * u + 6 * u * u) * A, turn };
+      };
+      row(count).forEach(({ x, dy }, j) => {
+        const u = clamp((t - (j / Math.max(1, count - 1)) * 0.12) / 0.85, 0, 1);
+        if (u >= 1) return;
+        const face = facing(x, ya + dy);
+        if (reduced()) {
+          spook(x, ya + dy, p.side, scale, 0, 0.95 * (1 - u), true, 0, face, scale, 0, 0.6);
+          return;
+        }
+        const go = up(x, dy, j, u);
+        const spun = Math.floor(ANGLES * 4 * u * u);
+        const fade = 0.95 * (1 - smooth01((u - 0.6) / 0.4));
+        spook(go.x, go.y, p.side, Math.round(scale * (1 - 0.45 * ease(u)) * 10) / 10, go.turn, fade, true, go.lift, (((face - spun) % ANGLES) + ANGLES) % ANGLES, scale, 0, 0.3 + 0.25 * (1 - u));
+        for (let tr = 1; tr <= 5; tr++) {
+          const back = up(x, dy, j, Math.max(0, u - tr * 0.035));
+          glows.push({ p: S(back.x, back.y, back.lift + 0.5 * A * scale), r: 0.16 * A, rgb: "255, 90, 120", a: 0.75 * (1 - tr / 6) * fade });
+        }
+      });
+      if (!reduced()) for (let i = 0; i < 6; i++) glows.push({ p: S(cx, ya, i * 1.1 * A), r: (0.9 - 0.08 * i) * A, rgb: "255, 60, 100", a: 0.18 * Math.sin(Math.PI * clamp(t * 1.4, 0, 1)) });
+      const q = S(-KIDS_BACK, ky);
+      flashes.push({ p: q, r: (1.4 + 2.4 * t) * A, rgb: "255, 60, 90", a: 0.8 * (1 - t) });
+      bolts.push(() => {
+        for (const r of [0.55, 1]) oval(ctx, q.x, q.y, (0.4 + 2.6 * t * r) * A, (0.2 + 1.3 * t * r) * A, undefined, `rgba(255, 77, 109, ${1 - t})`, 3);
+      });
+      flush = Math.max(flush, Math.pow(1 - t, 3));
     }
     if (yours.flag && yf !== null) {
       const banks = yours.flag.banks;
@@ -2062,16 +2171,63 @@ export function Field(props: Props) {
       kidsSoon(kidPx, toward);
     }
     kidsSoon(kidPx, gait.pose);
-    const kidsNow = kidsAt(kidPx, strideNow, gait.pose);
+    // Electrocuted, they freeze in the stride and the way round they were struck in.
+    const zap = m.zap && now - m.zap.at < ZAP_MS ? m.zap : null;
+    if (!zap) m.zap = null;
+    else if (zap.stride < 0) {
+      zap.stride = strideNow;
+      zap.pose = gait.pose;
+    }
+    if (yours.call && yours.flag) bonesSoon(kidPx, gait.pose);
+    const kidsNow = zap ? kidsAt(kidPx, zap.stride, zap.pose) : kidsAt(kidPx, strideNow, gait.pose);
     casters.push({ x: kx, y: ky, z: jump, shape: () => shapeOf(kidsNow, dpr) });
     let torch: Pt | null = null;
     put(kx, ky, () => {
       const p = S(kx, ky, jump);
       p.x += tremble;
       const f = kidsNow;
-      ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
+      // Lightning going through them: they shake, flickering between themselves and their white bones in a charred black body,
+      // with sparks crackling over them.
+      const age = zap ? now - zap.at : 0;
+      const crackling = !!zap && age < ZAP_MS - 300;
+      const xray = crackling && (reduced() ? age < 1000 : Math.floor(age / 90) % 2 === 0);
+      if (zap && !reduced()) {
+        const shake = 1 - age / ZAP_MS;
+        p.x += Math.sin(at / 11) * 2.2 * k * shake;
+        p.y += Math.cos(at / 15) * 1.2 * k * shake;
+      }
+      if (xray) {
+        // Laid down again once the dusk and the light are on, so the body stays black and the bones white, the glow round them.
+        const b = bonesAt(kidPx, zap!.stride, zap!.pose);
+        const xrayed = () => {
+          ctx.drawImage(tintOf(f.canvas, CHARRED), p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
+          ctx.drawImage(b.canvas, p.x - b.ox / dpr, p.y - b.oy / dpr, b.w / dpr, b.h / dpr);
+        };
+        xrayed();
+        bolts.push(xrayed);
+        glows.push({ p: { x: p.x, y: p.y - 0.75 * A }, r: 1.4 * A, rgb: "150, 190, 255", a: 0.55 });
+      } else ctx.drawImage(f.canvas, p.x - f.ox / dpr, p.y - f.oy / dpr, f.w / dpr, f.h / dpr);
+      if (crackling && !reduced()) {
+        const spark = Math.floor(age / 70);
+        const paths = [0, 1, 2].map((n) => {
+          const seed = (zap!.at % 997) + spark * 7.3 + n * 31.1;
+          let x = p.x + (hash(seed) - 0.5) * 1.2 * A;
+          let y = p.y - (0.15 + hash(seed * 1.7) * 1.1) * A;
+          let turn = hash(seed * 2.3) * Math.PI * 2;
+          const pts: Pt[] = [];
+          for (let i = 0; i < 6; i++) {
+            pts.push({ x, y });
+            turn += (hash(seed * 3.1 + i) - 0.5) * 2.2;
+            x += Math.cos(turn) * 0.14 * A;
+            y += Math.sin(turn) * 0.14 * A;
+          }
+          return { pts, w: 0.5 };
+        });
+        bolts.push(() => glowing(ctx, paths, A / 30, 1));
+      }
+      if (xray) return;
       // The torch is the one light about them: no glow round the eldest's lantern, so the beam reads.
-      const lens = kidsTorch(2.05 * k, kidTurn(gait.pose));
+      const lens = kidsTorch(2.05 * k, kidTurn(zap ? zap.pose : gait.pose));
       torch = { x: p.x + lens.x, y: p.y + lens.y };
       glows.push({ p: torch, r: 0.4 * A, rgb: "255, 236, 190", a: 0.8 });
     });
@@ -2209,6 +2365,11 @@ export function Field(props: Props) {
       ctx.globalCompositeOperation = "lighter";
     }
     for (const glow of [...glows, ...flashes]) if (glow.a >= 0.05) shine(ctx, glow.p.x, glow.p.y, glow.r, glow.r, glow.rgb, glow.a, true);
+    if (bustLine) {
+      const { y, x0 } = bustLine;
+      line(ctx, S(x0, y), S(ext.x1, y), `rgba(255, 50, 80, ${0.18 + 0.3 * pulse * (0.3 + hurt)})`, 9);
+      line(ctx, S(x0, y), S(ext.x1, y), `rgba(255, 120, 140, ${0.35 + 0.3 * pulse})`, 2.4);
+    }
     // The ectoplasm (ECTO): each sheet laid in a half-size scratch canvas on the ground plane, lifted to its height, moving with the
     // ground and drifting over it, kept to the rim, then added on.
     if (!ectoSheets && !ectoAsked) {
@@ -2271,38 +2432,20 @@ export function Field(props: Props) {
       ctx.restore();
     }
 
-    // Tilt-shift, like a model photographed close up: the top and bottom of the view go soft. Too costly on a phone or tablet, or
-    // on a field of a great many pixels.
-    if (v.w >= 600 && !coarse() && c.width * c.height <= 8e6) {
-      const tw = Math.max(1, Math.round(c.width / 2));
-      const th = Math.max(1, Math.round(c.height / 2));
-      const b = soft.current ?? document.createElement("canvas");
-      soft.current = b;
-      if (b.width !== tw || b.height !== th) {
-        b.width = tw;
-        b.height = th;
-      }
-      const gb = b.getContext("2d")!;
-      gb.globalCompositeOperation = "source-over";
-      gb.clearRect(0, 0, tw, th);
-      gb.filter = "blur(1.1px)";
-      gb.drawImage(c, 0, 0, tw, th);
-      gb.filter = "none";
-      gb.globalCompositeOperation = "destination-in";
-      const band = gb.createLinearGradient(0, 0, 0, th);
-      band.addColorStop(0, "rgba(0, 0, 0, 1)");
-      band.addColorStop(0.22, "rgba(0, 0, 0, 0.85)");
-      band.addColorStop(0.38, "rgba(0, 0, 0, 0)");
-      band.addColorStop(0.62, "rgba(0, 0, 0, 0)");
-      band.addColorStop(0.78, "rgba(0, 0, 0, 0.85)");
-      band.addColorStop(1, "rgba(0, 0, 0, 1)");
-      gb.fillStyle = band;
-      gb.fillRect(0, 0, tw, th);
-      ctx.save();
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(b, 0, 0, c.width, c.height);
-      ctx.restore();
+    // In a loss, the edge of the view the bust lies past glows red to the beat, from faint to strong as the kids near it: the south
+    // edge for a long, the north for a short. Busted, the whole field flushes red a moment.
+    if (yours.call && losing > 0.01) {
+      const south = yours.call.side === "long";
+      const a = losing * (0.12 + 0.43 * hurt) * (0.6 + 0.4 * pulse);
+      const band = ctx.createLinearGradient(0, south ? v.h : 0, 0, south ? v.h * 0.5 : v.h * 0.5);
+      band.addColorStop(0, `rgba(255, 40, 70, ${a})`);
+      band.addColorStop(1, "rgba(255, 40, 70, 0)");
+      ctx.fillStyle = band;
+      ctx.fillRect(0, 0, v.w, v.h);
+    }
+    if (flush > 0.01) {
+      ctx.fillStyle = `rgba(255, 30, 60, ${0.34 * flush})`;
+      ctx.fillRect(0, 0, v.w, v.h);
     }
 
     // A fill: a puff of dust where the hand was, in the candle they're in.

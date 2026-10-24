@@ -563,6 +563,23 @@ h2 {
   color: var(--rose);
 }
 
+/* In the lobby the word itself is big over the field, with its countdown under it. */
+.timer.lobby {
+  top: 14px;
+}
+
+.timer.lobby small {
+  color: var(--text);
+  font: 64px/1 var(--display), sans-serif;
+  letter-spacing: 0.04em;
+  text-shadow: 4px 4px 0 #000;
+}
+
+.timer.lobby b {
+  margin-top: 4px;
+  font-size: 40px;
+}
+
 .back {
   display: inline-flex;
   align-items: center;
@@ -618,28 +635,36 @@ h2 {
 
 
 
+/* What just happened: dropped in from the top of the field, clear of the play, and taken back up as it goes. */
 .banner {
   position: absolute;
   left: 50%;
-  top: 40%;
+  top: 10px;
   z-index: 5;
+  max-width: calc(100% - 20px);
   pointer-events: none;
-  transform: translate(-50%, -50%) skewX(-8deg);
+  transform: translateX(-50%) skewX(-8deg);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 14px 40px;
+  padding: 8px 30px 10px;
   background: var(--panel);
   border: 3px solid var(--text);
   border-radius: 12px;
   box-shadow: var(--pop);
-  animation: slam 0.3s cubic-bezier(0.2, 1.6, 0.4, 1);
+  text-align: center;
+  animation: drop 1.7s both;
 }
 
 .banner b {
   color: var(--text);
-  font: 40px var(--display), sans-serif;
+  font: 34px/1.1 var(--display), sans-serif;
   text-transform: uppercase;
+}
+
+.banner span {
+  color: var(--soft);
+  font-size: 14px;
 }
 
 .banner.good {
@@ -658,10 +683,134 @@ h2 {
   color: var(--rose);
 }
 
-@keyframes slam {
+@keyframes drop {
   from {
-    transform: translate(-50%, -50%) skewX(-8deg) scale(1.6);
-    opacity: 0;
+    transform: translate(-50%, calc(-100% - 20px)) skewX(-8deg);
+    animation-timing-function: cubic-bezier(0.2, 1.5, 0.4, 1);
+  }
+  16%,
+  84% {
+    transform: translateX(-50%) skewX(-8deg);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.8, 0.4);
+  }
+  to {
+    transform: translate(-50%, calc(-100% - 20px)) skewX(-8deg);
+  }
+}
+
+/* While you're in, how far the price has come from your ghosts toward your bust: a rail down the field's west edge, your price at
+   one end and the bust at the other, the way they lie on the field (the bust south of you for a long, north for a short). */
+.gauge {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  height: min(52%, 300px);
+  pointer-events: none;
+  transform: translateY(-50%);
+  font: 12px var(--mono), monospace;
+  text-transform: uppercase;
+}
+
+.gauge.short {
+  flex-direction: column-reverse;
+}
+
+.gauge .end {
+  padding: 2px 7px;
+  background: rgba(9, 12, 16, 0.85);
+  border: 1px solid;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.gauge .in {
+  border-color: rgba(43, 245, 181, 0.4);
+  color: var(--mint);
+}
+
+.gauge .out {
+  border-color: rgba(255, 77, 109, 0.55);
+  color: var(--rose);
+}
+
+.gauge .rail {
+  position: relative;
+  flex: 1;
+  width: 8px;
+  margin-left: 12px;
+  background: rgba(9, 12, 16, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 6px;
+}
+
+.gauge .fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(var(--to) * 100%);
+  background: linear-gradient(rgba(255, 77, 109, 0.45), var(--rose));
+  border-radius: 6px;
+  transition: height 0.25s linear;
+}
+
+.gauge.short .fill {
+  top: auto;
+  bottom: 0;
+  background: linear-gradient(var(--rose), rgba(255, 77, 109, 0.45));
+}
+
+.gauge .now {
+  position: absolute;
+  top: calc(var(--to) * 100%);
+  left: 50%;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
+  background: var(--text);
+  border: 3px solid var(--mint);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #000;
+  transition: top 0.25s linear, bottom 0.25s linear;
+}
+
+.gauge.short .now {
+  top: auto;
+  bottom: calc(var(--to) * 100%);
+  margin: 0 0 -8px -8px;
+}
+
+.gauge .now em {
+  position: absolute;
+  top: 50%;
+  left: 18px;
+  color: var(--text);
+  font-style: normal;
+  white-space: nowrap;
+  text-shadow: 0 1px 0 #000, 0 0 6px #000;
+  transform: translateY(-50%);
+}
+
+.gauge.losing .now {
+  border-color: var(--rose);
+}
+
+.gauge.losing .now em {
+  color: var(--rose);
+}
+
+.gauge.near .rail {
+  animation: alarm 0.8s ease-in-out infinite;
+}
+
+@keyframes alarm {
+  50% {
+    box-shadow: 0 0 14px 3px rgba(255, 77, 109, 0.8);
   }
 }
 
@@ -2235,6 +2384,11 @@ h2 {
     animation: none;
   }
 
+  .banner,
+  .gauge.near .rail {
+    animation: none;
+  }
+
   .count.boo {
     animation: fade-out 1s ease-in both;
   }
@@ -2334,5 +2488,32 @@ h2 {
   .back svg {
     width: 24px;
     height: 24px;
+  }
+
+  .banner {
+    top: 8px;
+    padding: 6px 20px 8px;
+  }
+
+  .banner b {
+    font-size: 24px;
+  }
+
+  .banner span {
+    font-size: 12px;
+  }
+
+  .timer.lobby small {
+    font-size: 46px;
+  }
+
+  .timer.lobby b {
+    font-size: 30px;
+  }
+
+  .gauge {
+    left: 10px;
+    height: 44%;
+    font-size: 11px;
   }
 }

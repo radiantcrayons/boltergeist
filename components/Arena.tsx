@@ -297,11 +297,17 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
         .map((f) => ({ t: f.out!.at, p: f.out!.price, glyph: f.out!.by === "ko" ? "BUSTED" : "⚡", color: f.id === YOU ? COLORS.down : f.out!.by === "ko" ? COLORS.dim : COLORS.volt })),
     [fighters],
   );
+  // How your last call ended, so the field can show it: struck by your thundercloud, busted, or given up.
+  const ended = game.feed.find((e) => e.who === "you" && (e.what === "bank" || e.what === "ko"));
   const yours: Yours = {
     ...(trap && !me.call && { trap: { side: trap.side, price: trap.price, at: trap.at, power: trap.power, count: COUNTS[fear], ahead: lineAhead?.orders } }),
     ...(me.call && { call: { side: me.call.side, entry: me.call.entry, at: me.call.at, power: me.call.power, count: COUNTS[fear], maker: !!me.call.maker, koAt: me.call.koAt, move: moveOf(me.call, game.price) } }),
     ...(flag !== undefined && { flag: { price: flag, banks: me.call ? valueOf(me.call, flag, STRIKE.maker) - me.call.stake : undefined, ahead: flagAhead?.orders } }),
+    ...(ended && { end: { by: ended.what === "ko" ? "bust" : ended.maker ? "cloud" : "hand", at: ended.at } }),
   };
+  // How far from your ghosts to the bust the price has come, and how far it still has to go.
+  const toBust = me.call ? Math.min(1, Math.max(0, (me.call.side === "long" ? me.call.entry - shownPrice : shownPrice - me.call.entry) / (Math.abs(me.call.entry - me.call.koAt) || 1))) : 0;
+  const bustLeft = me.call ? Math.abs(shownPrice - me.call.koAt) / shownPrice : 0;
   const steps = Array.from({ length: Math.max(0, rounds - 1) }, (_, r) => roundEnds(game, r));
   // What's next on the clock: the start in the lobby, then each new round, then the final bell.
   const nextAt = waiting ? game.startsAt : (steps.find((t) => t > nowMs) ?? game.endsAt);
@@ -349,7 +355,7 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
             onPick={onPick}
           />
         {waiting && !(count <= 10) && (
-          <div className="timer" title="Everyone starts together when the lobby closes">
+          <div className="timer lobby" title="Everyone starts together when the lobby closes">
             <small>lobby</small>
             <b>{fmt.clock(nextAt - nowMs)}</b>
           </div>
@@ -363,6 +369,26 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
           <div className="count boo" aria-hidden="true">
             <b>boo!</b>
             <small>the haunting begins</small>
+          </div>
+        )}
+        {me.call && !game.over && (
+          <div
+            className={`gauge ${me.call.side} ${toBust > 0 ? "losing" : ""} ${toBust > 0.6 ? "near" : ""}`}
+            style={{ "--to": toBust } as CSSProperties}
+            role="meter"
+            aria-label="How close you are to being busted"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(toBust * 100)}
+          >
+            <span className="end in">in {fmt.price(me.call.entry, tickSize)}</span>
+            <span className="rail">
+              <i className="fill" />
+              <i className="now">
+                <em>{(bustLeft * 100).toFixed(bustLeft < 0.01 ? 2 : 1)}% to bust</em>
+              </i>
+            </span>
+            <span className="end out">bust {fmt.price(me.call.koAt, tickSize)}</span>
           </div>
         )}
         {moment &&
