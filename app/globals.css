@@ -698,8 +698,9 @@ h2 {
   }
 }
 
-/* While you're in, how far the price has come from your ghosts toward your bust: a rail down the field's west edge, your price at
-   one end and the bust at the other, the way they lie on the field (the bust south of you for a long, north for a short). */
+/* While you're losing, how far the price has come from your ghosts toward your bust: a rail down the field's west edge, your price
+   at one end and the bust at the other, the way they lie on the field (the bust south of you for a long, north for a short),
+   fading in as it comes. */
 .gauge {
   position: absolute;
   left: 14px;
@@ -714,6 +715,13 @@ h2 {
   transform: translateY(-50%);
   font: 12px var(--mono), monospace;
   text-transform: uppercase;
+  animation: gauge-in 0.35s ease-out;
+}
+
+@keyframes gauge-in {
+  from {
+    opacity: 0;
+  }
 }
 
 .gauge.short {
@@ -2385,6 +2393,7 @@ h2 {
   }
 
   .banner,
+  .gauge,
   .gauge.near .rail {
     animation: none;
   }

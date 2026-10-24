@@ -1375,19 +1375,18 @@ export function Field(props: Props) {
     // It rains the whole night through, and the only lightning is your thundercloud's.
     const wet = reduced() ? 0 : RAIN;
     for (const key of m.summoned.keys()) if (key !== m.flag) m.summoned.delete(key);
-    // How far your call has gone wrong: whether it's in a loss at all (half a row the wrong side of your ghosts is enough to show), and
-    // how far from your ghosts to the bust the kids have come. Your ghosts flash red with it to a beat that quickens from under one a
-    // second to two as the bust nears, and the edge of the view the bust lies past glows red.
-    let losing = 0;
+    // How far your call has gone wrong: how far from your ghosts to the bust the kids have come, 0 at your entry and 1 at the bust.
+    // Past half way your ghosts flash red, to a beat that quickens from once a second to twice as the bust nears, and the edge of
+    // the view the bust lies past glows red; short of it, nothing.
     let hurt = 0;
     if (yours.call) {
       const c = yours.call;
       const wrong = c.side === "long" ? c.entry - live : live - c.entry;
-      losing = clamp(wrong / (g.rowSize * 0.5), 0, 1);
       hurt = clamp(wrong / (Math.abs(c.entry - c.koAt) || 1), 0, 1);
     }
-    const alarm = losing * (0.65 + 0.35 * hurt);
-    m.beat.phase = (m.beat.phase + (Math.min(at - (m.beat.at || at), 100) / 1000) * Math.PI * 2 * (0.7 + 1.3 * hurt)) % (Math.PI * 2);
+    const danger = clamp((hurt - 0.5) / 0.5, 0, 1);
+    const alarm = smooth01((hurt - 0.5) / 0.04) * (0.55 + 0.45 * danger);
+    m.beat.phase = (m.beat.phase + (Math.min(at - (m.beat.at || at), 100) / 1000) * Math.PI * 2 * (1 + danger)) % (Math.PI * 2);
     m.beat.at = at;
     const pulse = reduced() ? 0.6 : 0.5 + 0.5 * Math.sin(m.beat.phase);
 
@@ -2432,11 +2431,11 @@ export function Field(props: Props) {
       ctx.restore();
     }
 
-    // In a loss, the edge of the view the bust lies past glows red to the beat, from faint to strong as the kids near it: the south
-    // edge for a long, the north for a short. Busted, the whole field flushes red a moment.
-    if (yours.call && losing > 0.01) {
+    // Past half way to the bust, the edge of the view the bust lies past glows red to the beat, stronger as the kids near it: the
+    // south edge for a long, the north for a short. Busted, the whole field flushes red a moment.
+    if (yours.call && alarm > 0.01) {
       const south = yours.call.side === "long";
-      const a = losing * (0.12 + 0.43 * hurt) * (0.6 + 0.4 * pulse);
+      const a = alarm * (0.2 + 0.35 * danger) * (0.6 + 0.4 * pulse);
       const band = ctx.createLinearGradient(0, south ? v.h : 0, 0, south ? v.h * 0.5 : v.h * 0.5);
       band.addColorStop(0, `rgba(255, 40, 70, ${a})`);
       band.addColorStop(1, "rgba(255, 40, 70, 0)");
