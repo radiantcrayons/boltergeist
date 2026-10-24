@@ -572,6 +572,10 @@ const ZOOM_MS = 260;
 // Every word on the field is set at one size, in tiles tall; the prices you've set sit a little see-through.
 const WORD = 0.4;
 const SET = 0.72;
+// How much further from the pointer than usual a click may be put down, in rows as they are at 100% (so fewer zoomed in, as far
+// on the screen). Keeping clear of where the price has been the last few seconds can take it a long way off after a quick move,
+// and then nothing is put down: the pointer says why instead.
+const NUDGE = 3;
 
 const stormAt = (px: number) => figure(`storm|${px}`, () => paintCloud(px), "storm", px);
 const treeAt = (px: number, variant: number) => figure(`tree|${px}|${variant}`, () => paintTree(px, variant), `tree|${variant}`, px);
@@ -1230,6 +1234,11 @@ export function Field(props: Props) {
     const u = (clientX - box.left - v.OX) / v.A;
     const w = (2 * (clientY - box.top - v.OY)) / v.A;
     return priceAt((w - u) / 2) + ground.current.lag;
+  }
+
+  // Whether what a click would put down is near enough the pointer to put down.
+  function near(picked: Pick) {
+    return (picked.kept ?? 0) <= (NUDGE / view.current.z) * ground.current.rowSize;
   }
 
   // The grass, painted once onto a sheet of ground and moved with the field. Before the field walks off it the next sheet is
@@ -2627,7 +2636,9 @@ export function Field(props: Props) {
     field.restore();
     written.current = spots;
 
-    const picked = hovered !== null && pick ? pick(hovered) : null;
+    const offer = hovered !== null && pick ? pick(hovered) : null;
+    const picked = offer && near(offer) ? offer : null;
+    if (offer && !picked) marking("THE PRICE WAS JUST HERE", 0, yOf(hovered! - g.lag) + 0.62, COLORS.dim, { align: "center", alpha: SET });
     // What a click here would put on the field, shown faintly where it would go.
     if (picked) {
       const p = picked.p;
@@ -2734,32 +2745,54 @@ export function Field(props: Props) {
     observer.observe(el);
     resize();
 
-    // Zoom by the mouse wheel or a trackpad (a trackpad's pinch comes as small steps with ctrl held). Each gesture is a step: the
-    // scroll after a step that keeps on coming the same way is that flick running on and goes by, but a pause makes the next a new
-    // gesture, and turning the other way is a new step at once. Safari's trackpad pinch comes as gestures instead; a pinch on the
-    // screen is the pointers' (below).
+    // Zoom by the mouse wheel or a trackpad. A trackpad's pinch comes as small scrolls with ctrl held, and zooms a step as soon as
+    // it spreads or closes, then another each time it goes on by about half again. A scroll is a step a gesture: a flick running
+    // on after its step goes by while it slows, but a pause, a turn the other way, or a fresh push (the scroll speeding up again
+    // after slowing, as it does when a new swipe cuts the last one's run short) is a new step at once. Safari's trackpad pinch
+    // comes as gestures instead; a pinch on the screen is the pointers' (below).
     let spun = 0;
-    let last = 0;
+    let last = -Infinity;
     let went = 0;
+    let again = false;
     let held = false;
+    // The held flick: its fastest since its step, its slowest since it slowed to under half that, and for how many scrolls.
+    let peak = 0;
+    let dip = Infinity;
+    let slow = 0;
     let spread = 1;
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
-      const t = performance.now();
       const dy = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY;
-      const pause = t - last > 150;
-      last = t;
+      const gap = e.timeStamp - last;
+      last = e.timeStamp;
       if (!dy) return;
       const way = dy < 0 ? 1 : -1;
-      if (pause || way !== went) held = false;
-      if (held) return;
+      const pause = gap > 100;
       if (pause || Math.sign(spun) !== Math.sign(dy)) spun = 0;
+      if (pause || way !== went) again = false;
+      if (!again || e.ctrlKey) held = false;
+      // How fast it's scrolling, in pixels a frame, so scrolls run together while the page was busy don't look like a push.
+      const speed = (Math.abs(dy) * 16) / clamp(gap, 8, 100);
+      if (held) {
+        if (slow >= 2 && speed >= Math.max(dip * 2.5, dip + 3)) held = false;
+        else {
+          peak = Math.max(peak, speed);
+          const slowing = speed < peak / 2;
+          slow = slowing ? slow + 1 : 0;
+          dip = slowing ? Math.min(dip, speed) : Infinity;
+          return;
+        }
+      }
       spun += dy;
-      if (Math.abs(spun) < (e.ctrlKey ? 10 : 30)) return;
+      if (Math.abs(spun) < (e.ctrlKey ? (again ? 40 : 12) : 30)) return;
       zoomBy(way);
-      went = way;
-      held = true;
       spun = 0;
+      went = way;
+      again = true;
+      held = !e.ctrlKey;
+      peak = speed;
+      dip = Infinity;
+      slow = 0;
     };
     const gesture = (e: Event) => {
       e.preventDefault();
@@ -2820,11 +2853,13 @@ export function Field(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Where the field is on the page is read again on placing, in case the page moved it without a scroll or a resize.
   const place = (clientX: number, clientY: number) => {
+    placed.current = null;
     const p = priceUnder(clientX, clientY);
     const { pick, onPick } = latest.current;
     const picked = p !== null && pick?.(p);
-    if (picked && onPick) onPick(picked.p);
+    if (picked && near(picked) && onPick) onPick(picked.p);
   };
 
   return (
@@ -2889,6 +2924,7 @@ export function Field(props: Props) {
         aiming.current = false;
         hover.current = null;
       }}
+      onPointerEnter={() => (placed.current = null)}
       onPointerLeave={(e) => {
         if (e.pointerType === "mouse") hover.current = null;
       }}

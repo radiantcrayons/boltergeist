@@ -24,8 +24,9 @@ export function huesFor(ids: string[]): Map<string, string> {
   }
   return out;
 }
-// What a click at a price would do, if anything, the price it would use, and what it would put on the field there.
-export type Pick = { p: number; label: string; color: string; art?: "cloud" | { side: "long" | "short"; count: number } };
+// What a click at a price would do, if anything, the price it would use, and what it would put on the field there; and how much
+// further from the click that price is for keeping clear of where the price has just been, past the margin it always keeps.
+export type Pick = { p: number; label: string; color: string; art?: "cloud" | { side: "long" | "short"; count: number }; kept?: number };
 
 // A round step for marking prices: 1, 2 or 5 of a power of ten.
 export function niceStep(raw: number): number {

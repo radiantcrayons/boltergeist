@@ -233,24 +233,27 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
     low = Math.min(low, ticks[i].p);
     high = Math.max(high, ticks[i].p);
   }
-  const onTick = (p: number) => {
+  // The tick a click goes to, kept clear of everywhere the price has been lately (or, calm, of just where it is now).
+  const onTick = (p: number, calm = false) => {
     const up = p >= shownPrice;
+    const [top, bottom] = calm ? [shownPrice, shownPrice] : [high, low];
     let at = (up ? Math.ceil : Math.floor)(p / tickSize - (up ? 1e-9 : -1e-9)) * tickSize;
-    if (up && at < high + margin) at = Math.ceil((high + margin) / tickSize - 1e-9) * tickSize;
-    if (!up && at > low - margin) at = Math.floor((low - margin) / tickSize + 1e-9) * tickSize;
+    if (up && at < top + margin) at = Math.ceil((top + margin) / tickSize - 1e-9) * tickSize;
+    if (!up && at > bottom - margin) at = Math.floor((bottom - margin) / tickSize + 1e-9) * tickSize;
     return Number(at.toFixed(12));
   };
   const pick = (raw: number): Pick | null => {
     if (!can || waiting) return null;
     const side = sideOf(raw);
     const p = onTick(raw);
+    const kept = Math.abs(p - onTick(raw, true));
     if (me.call) {
       if (side === me.call.side) return null;
-      return { p, label: `pays ${fmt.money(valueOf(me.call, p, STRIKE.maker) - me.call.stake, true)}`, color: COLORS.volt, art: "cloud" };
+      return { p, label: `pays ${fmt.money(valueOf(me.call, p, STRIKE.maker) - me.call.stake, true)}`, color: COLORS.volt, art: "cloud", kept };
     }
-    if (trap && side !== trap.side) return { p, label: "", color: COLORS.volt, art: "cloud" };
+    if (trap && side !== trap.side) return { p, label: "", color: COLORS.volt, art: "cloud", kept };
     if (least > most) return null;
-    return { p, label: `${side} ${charge}x`, color: side === "long" ? COLORS.up : COLORS.down, art: { side, count: COUNTS[fear] } };
+    return { p, label: `${side} ${charge}x`, color: side === "long" ? COLORS.up : COLORS.down, art: { side, count: COUNTS[fear] }, kept };
   };
   const onPick = (p: number) => {
     if (me.call || (trap && sideOf(p) !== trap.side)) war.flag(game.id, p);
@@ -314,10 +317,11 @@ export function Arena({ game, mark, tickSize, ticks, war, scenes, onAgain, onLea
   const heat = Math.round(Math.abs(swing) * 4);
   const glow = heat ? heatOf(swing < 0 ? ROSE : MINT, heat) : null;
   // What the field says along its foot: what you can do now, the whole time (hints); and in their place for a few seconds,
-  // anything brief: Strike's word on something that didn't go through, or what's on its way to Strike while it is.
+  // anything brief: Strike's word on something that didn't go through, or what's on its way to Strike while it is. Nothing to
+  // click for in the lobby, so no hints till it's over.
   const hints: Line[] = me.out
     ? [{ text: me.out.by === "ko" ? "you got busted" : "you were banished", tone: "bad" }, ...(game.over ? [] : [{ text: "watch the rest, or haunt again", tone: "dim" as const }])]
-    : game.over
+    : game.over || waiting
       ? []
       : me.call
         ? [
